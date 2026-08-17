@@ -29,7 +29,7 @@
 | 📊 数据监控 | CPU / 内存 / 磁盘 / 网络 / 负载 / 系统信息实时图表（3 秒轮询） |
 | 🖥️ 多服务器管理 | 服务器增删改查、SSH 连接测试、凭据 AES-256-GCM 加密存储 |
 | 📦 软件商店 | Nginx / MySQL / Redis / Docker / Node / Python / Git / Fail2ban / Supervisor 等一键安装与**卸载**；**PHP 多版本**（7.4-8.3 并存、默认版本切换）；**Java 环境**（8/11/17 安装与切换）；Composer |
-| 🗄️ 数据库管理 | MySQL 面板（phpMyAdmin 风格：库 → 表 → 结构 → 数据分页 → 执行 SQL，危险 SQL 拦截）；MySQL 多版本检测/安装/切换；Redis 状态与键管理 |
+| 🗄️ 数据库管理 | MySQL 面板（Navicat 风格：库 → 表 → 结构 → 数据分页 → 执行 SQL；可视化创建/删除库表、字段增改删、行数据增改删，危险操作二次确认）；MySQL 多版本检测/安装/切换；Redis 状态与键管理 |
 | 🌐 网站管理 | PHP（Nginx+php-fpm）/ Node / Python / Java 站点创建、systemd 服务管理、启停/重启/日志；**站点设置**：多域名、运行目录、伪静态（ThinkPHP/Laravel/WordPress 等预设，创建时可选）、默认文档、IP 黑白名单、密码访问、防盗链、重定向、反向代理、PHP 版本切换、SSL 关联、配置预览、网站日志 |
 | 🐳 进程守护 | Supervisor 进程管理（创建配置、启停、删除） |
 | 💾 磁盘管理 | lsblk / df 列表、分区挂载/卸载（危险路径保护） |

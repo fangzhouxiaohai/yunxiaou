@@ -422,6 +422,240 @@ function createDatabaseRouter({ config, pool, store }) {
     }
   });
 
+  // ===== 表/字段/行管理（Navicat 风格基础操作）=====
+
+  // SQL 字符串字面量转义（MySQL 默认模式下 \ 与 ' 都需转义）
+  function sqlEscape(v) {
+    return String(v).replace(/\\/g, '\\\\').replace(/'/g, "''");
+  }
+
+  // 值 → SQL 字面量：null/undefined → NULL，其余按字符串引用（MySQL 隐式类型转换）
+  function sqlLiteral(v) {
+    if (v === null || v === undefined) return 'NULL';
+    return `'${sqlEscape(v)}'`;
+  }
+
+  const COLUMN_TYPES = ['int', 'bigint', 'smallint', 'tinyint', 'varchar', 'char', 'text', 'mediumtext', 'longtext', 'datetime', 'date', 'time', 'timestamp', 'decimal', 'float', 'double', 'json'];
+  const NUMERIC_TYPES = ['int', 'bigint', 'smallint', 'tinyint', 'decimal', 'float', 'double'];
+  const LENGTHLESS_TYPES = ['text', 'mediumtext', 'longtext', 'datetime', 'date', 'time', 'timestamp', 'json'];
+  const ENGINES = ['InnoDB', 'MyISAM'];
+  const CHARSETS = ['utf8mb4', 'utf8', 'latin1', 'gbk'];
+
+  // 校验并拼出列定义；非法输入返回 { error }
+  function buildColumnDef(col) {
+    if (!col || !TABLE_RE.test(col.name || '')) return { error: `字段名不合法: ${col && col.name}` };
+    const type = String(col.type || '').toLowerCase();
+    if (!COLUMN_TYPES.includes(type)) return { error: `不支持的字段类型: ${col.type}` };
+    let def = `\`${col.name}\` ${type}`;
+    if (!LENGTHLESS_TYPES.includes(type)) {
+      if (col.length !== undefined && col.length !== null && String(col.length) !== '') {
+        const len = String(col.length);
+        if (!/^\d{1,5}(,\d{1,2})?$/.test(len)) return { error: `长度不合法: ${len}` };
+        if (type === 'decimal' ? /,/.test(len) || /^\d+$/.test(len) : /^\d+$/.test(len)) {
+          def += `(${len})`;
+        } else {
+          return { error: `长度不合法: ${len}` };
+        }
+      } else if (type === 'varchar' || type === 'char') {
+        return { error: `${type} 必须指定长度` };
+      }
+    }
+    def += col.nullable ? ' NULL' : ' NOT NULL';
+    if (col.autoIncrement) def += ' AUTO_INCREMENT';
+    if (col.defaultValue !== undefined && col.defaultValue !== null && String(col.defaultValue) !== '') {
+      const dv = String(col.defaultValue);
+      if (NUMERIC_TYPES.includes(type) && /^-?\d+(\.\d+)?$/.test(dv)) {
+        def += ` DEFAULT ${dv}`;
+      } else if (/^(current_timestamp|null)$/i.test(dv) && ['timestamp', 'datetime'].includes(type)) {
+        def += ` DEFAULT ${dv.toUpperCase()}`;
+      } else {
+        def += ` DEFAULT '${sqlEscape(dv)}'`;
+      }
+    }
+    if (col.comment) def += ` COMMENT '${sqlEscape(col.comment)}'`;
+    return { def, name: col.name };
+  }
+
+  // 拼 WHERE：使用 <=> 空值安全比较；条件为空返回 null（调用方拒绝）
+  function buildWhere(where) {
+    const keys = Object.keys(where || {});
+    if (keys.length === 0) return null;
+    for (const k of keys) {
+      if (!TABLE_RE.test(k)) return null;
+    }
+    return keys.map((k) => `\`${k}\` <=> ${sqlLiteral(where[k])}`).join(' AND ');
+  }
+
+  // 校验 SET 子句的键，返回 "k=v, ..."；非法返回 null
+  function buildSet(data) {
+    const keys = Object.keys(data || {});
+    if (keys.length === 0) return null;
+    for (const k of keys) {
+      if (!TABLE_RE.test(k)) return null;
+    }
+    return keys.map((k) => `\`${k}\` = ${sqlLiteral(data[k])}`).join(', ');
+  }
+
+  // 执行单条写 SQL：构造命令、执行、审计、响应；失败时返回 false 并已响应
+  async function execWriteSql(server, cfg, sql, res, auditAction, auditDetail) {
+    const cmd = mysqlCmd(server, sql, res);
+    if (cmd === null) return false;
+    const r = await pool.run(cfg, cmd, { timeoutMs: 60000 });
+    if (r.code !== 0) {
+      res.status(502).json({ code: 502, message: r.stderr.slice(0, 300) || `退出码 ${r.code}` });
+      return false;
+    }
+    audit(config.dataDir, { action: auditAction, target: server.host, detail: auditDetail, result: 'success' });
+    return true;
+  }
+
+  // 创建表
+  router.post('/servers/:id/databases/:db/tables', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const { table, columns, engine = 'InnoDB', charset = 'utf8mb4', comment } = req.body || {};
+    if (!validateDbAndTable(req.params.db, table, res)) return;
+    if (!Array.isArray(columns) || columns.length === 0) return res.status(400).json({ code: 400, message: '至少需要一个字段' });
+    if (columns.length > 100) return res.status(400).json({ code: 400, message: '字段数量过多' });
+    if (!ENGINES.includes(engine)) return res.status(400).json({ code: 400, message: '存储引擎仅支持 InnoDB/MyISAM' });
+    if (!CHARSETS.includes(charset)) return res.status(400).json({ code: 400, message: '字符集不支持' });
+    const defs = [];
+    const names = new Set();
+    for (const col of columns) {
+      const r = buildColumnDef(col);
+      if (r.error) return res.status(400).json({ code: 400, message: r.error });
+      if (names.has(r.name)) return res.status(400).json({ code: 400, message: `字段名重复: ${r.name}` });
+      names.add(r.name);
+      defs.push(r.def);
+    }
+    const pk = columns.filter((c) => c.primary).map((c) => `\`${c.name}\``);
+    if (pk.length > 0) defs.push(`PRIMARY KEY (${pk.join(', ')})`);
+    let sql = `CREATE TABLE \`${req.params.db}\`.\`${table}\` (${defs.join(', ')}) ENGINE=${engine} DEFAULT CHARSET=${charset}`;
+    if (comment) sql += ` COMMENT='${sqlEscape(comment)}'`;
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    if (await execWriteSql(server, cfg, sql, res, 'table.create', `${req.params.db}.${table}`)) {
+      res.json({ code: 0, data: { table } });
+    }
+  });
+
+  // 删除表
+  router.delete('/servers/:id/databases/:db/tables/:table', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (req.body?.confirm !== true) return res.status(400).json({ code: 400, message: '危险操作需确认（confirm: true）' });
+    if (!validateDbAndTable(req.params.db, req.params.table, res)) return;
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    const sql = `DROP TABLE \`${req.params.db}\`.\`${req.params.table}\``;
+    if (await execWriteSql(server, cfg, sql, res, 'table.drop', `${req.params.db}.${req.params.table}`)) {
+      res.json({ code: 0, data: { dropped: req.params.table } });
+    }
+  });
+
+  // 添加字段
+  router.post('/servers/:id/databases/:db/tables/:table/columns', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (!validateDbAndTable(req.params.db, req.params.table, res)) return;
+    const { column, after } = req.body || {};
+    const r = buildColumnDef(column);
+    if (r.error) return res.status(400).json({ code: 400, message: r.error });
+    let sql = `ALTER TABLE \`${req.params.db}\`.\`${req.params.table}\` ADD COLUMN ${r.def}`;
+    if (after) {
+      if (!TABLE_RE.test(after)) return res.status(400).json({ code: 400, message: 'after 字段名不合法' });
+      sql += ` AFTER \`${after}\``;
+    }
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    if (await execWriteSql(server, cfg, sql, res, 'column.add', `${req.params.db}.${req.params.table}.${r.name}`)) {
+      res.json({ code: 0, data: { column: r.name } });
+    }
+  });
+
+  // 修改字段（可改名）
+  router.put('/servers/:id/databases/:db/tables/:table/columns/:col', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (!validateDbAndTable(req.params.db, req.params.table, res)) return;
+    if (!TABLE_RE.test(req.params.col)) return res.status(400).json({ code: 400, message: '字段名不合法' });
+    const r = buildColumnDef(req.body?.column);
+    if (r.error) return res.status(400).json({ code: 400, message: r.error });
+    const sql = `ALTER TABLE \`${req.params.db}\`.\`${req.params.table}\` CHANGE COLUMN \`${req.params.col}\` ${r.def}`;
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    if (await execWriteSql(server, cfg, sql, res, 'column.modify', `${req.params.db}.${req.params.table}.${req.params.col} -> ${r.name}`)) {
+      res.json({ code: 0, data: { column: r.name } });
+    }
+  });
+
+  // 删除字段
+  router.delete('/servers/:id/databases/:db/tables/:table/columns/:col', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (req.body?.confirm !== true) return res.status(400).json({ code: 400, message: '危险操作需确认（confirm: true）' });
+    if (!validateDbAndTable(req.params.db, req.params.table, res)) return;
+    if (!TABLE_RE.test(req.params.col)) return res.status(400).json({ code: 400, message: '字段名不合法' });
+    const sql = `ALTER TABLE \`${req.params.db}\`.\`${req.params.table}\` DROP COLUMN \`${req.params.col}\``;
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    if (await execWriteSql(server, cfg, sql, res, 'column.drop', `${req.params.db}.${req.params.table}.${req.params.col}`)) {
+      res.json({ code: 0, data: { dropped: req.params.col } });
+    }
+  });
+
+  // 插入行
+  router.post('/servers/:id/databases/:db/tables/:table/rows', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (!validateDbAndTable(req.params.db, req.params.table, res)) return;
+    const data = req.body?.data || {};
+    const keys = Object.keys(data);
+    if (keys.length === 0) return res.status(400).json({ code: 400, message: '请提供至少一个字段值' });
+    for (const k of keys) {
+      if (!TABLE_RE.test(k)) return res.status(400).json({ code: 400, message: `字段名不合法: ${k}` });
+    }
+    const sql = `INSERT INTO \`${req.params.db}\`.\`${req.params.table}\` (${keys.map((k) => `\`${k}\``).join(', ')}) VALUES (${keys.map((k) => sqlLiteral(data[k])).join(', ')})`;
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    if (await execWriteSql(server, cfg, sql, res, 'row.insert', `${req.params.db}.${req.params.table}`)) {
+      res.json({ code: 0, data: { inserted: true } });
+    }
+  });
+
+  // 更新行：where 传原行全部列值（<=> 空值安全比较）
+  router.put('/servers/:id/databases/:db/tables/:table/rows', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (!validateDbAndTable(req.params.db, req.params.table, res)) return;
+    const where = buildWhere(req.body?.where);
+    if (where === null) return res.status(400).json({ code: 400, message: 'where 条件不能为空且字段名必须合法' });
+    const set = buildSet(req.body?.data);
+    if (set === null) return res.status(400).json({ code: 400, message: '请提供至少一个要修改的字段' });
+    const sql = `UPDATE \`${req.params.db}\`.\`${req.params.table}\` SET ${set} WHERE ${where}`;
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    if (await execWriteSql(server, cfg, sql, res, 'row.update', `${req.params.db}.${req.params.table}`)) {
+      res.json({ code: 0, data: { updated: true } });
+    }
+  });
+
+  // 删除行
+  router.delete('/servers/:id/databases/:db/tables/:table/rows', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (req.body?.confirm !== true) return res.status(400).json({ code: 400, message: '危险操作需确认（confirm: true）' });
+    if (!validateDbAndTable(req.params.db, req.params.table, res)) return;
+    const where = buildWhere(req.body?.where);
+    if (where === null) return res.status(400).json({ code: 400, message: 'where 条件不能为空且字段名必须合法' });
+    const sql = `DELETE FROM \`${req.params.db}\`.\`${req.params.table}\` WHERE ${where}`;
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    if (await execWriteSql(server, cfg, sql, res, 'row.delete', `${req.params.db}.${req.params.table}`)) {
+      res.json({ code: 0, data: { deleted: true } });
+    }
+  });
+
   return router;
 }
 

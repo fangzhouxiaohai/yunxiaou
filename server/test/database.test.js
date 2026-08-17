@@ -267,3 +267,112 @@ test('危险 SQL DROP TABLE 需确认', async () => {
   assert.equal(res.status, 200);
   assert.ok(calls.some((c) => c.includes('DROP TABLE')));
 });
+
+test('创建表生成 CREATE TABLE 语句', async () => {
+  const { app, calls } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/databases/app_blog/tables').set(await auth(app))
+    .send({
+      table: 'posts',
+      columns: [
+        { name: 'id', type: 'int', primary: true, autoIncrement: true },
+        { name: 'title', type: 'varchar', length: 200, nullable: false, defaultValue: '', comment: '标题' },
+        { name: 'created_at', type: 'datetime', nullable: true },
+      ],
+    });
+  assert.equal(res.status, 200, res.body.message);
+  const sql = calls.join(' ');
+  assert.ok(sql.includes('CREATE TABLE \\`app_blog\\`.\\`posts\\`'));
+  assert.ok(sql.includes('\\`id\\` int NOT NULL AUTO_INCREMENT'));
+  assert.ok(sql.includes('\\`title\\` varchar(200) NOT NULL'));
+  assert.ok(sql.includes("COMMENT '标题'"));
+  assert.ok(sql.includes('PRIMARY KEY (\\`id\\`)'));
+  assert.ok(sql.includes('ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'));
+});
+
+test('创建表缺长度 varchar 拒绝', async () => {
+  const { app, calls } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/databases/app_blog/tables').set(await auth(app))
+    .send({ table: 't1', columns: [{ name: 'name', type: 'varchar' }] });
+  assert.equal(res.status, 400);
+  assert.ok(!calls.some((c) => c.includes('CREATE TABLE')));
+});
+
+test('创建表非法类型拒绝', async () => {
+  const { app } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/databases/app_blog/tables').set(await auth(app))
+    .send({ table: 't1', columns: [{ name: 'x', type: 'varchar(200); DROP TABLE x;--' }] });
+  assert.equal(res.status, 400);
+});
+
+test('删除表需确认且确认后执行 DROP TABLE', async () => {
+  const { app, calls } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const noConfirm = await request(app).delete('/api/servers/srv1/databases/app_blog/tables/posts').set(await auth(app));
+  assert.equal(noConfirm.status, 400);
+  const res = await request(app).delete('/api/servers/srv1/databases/app_blog/tables/posts').set(await auth(app))
+    .send({ confirm: true });
+  assert.equal(res.status, 200);
+  assert.ok(calls.some((c) => c.includes('DROP TABLE \\`app_blog\\`.\\`posts\\`')));
+});
+
+test('添加/修改/删除字段生成对应 ALTER 语句', async () => {
+  const { app, calls } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const a = await auth(app);
+  let res = await request(app).post('/api/servers/srv1/databases/app_blog/tables/posts/columns').set(a)
+    .send({ column: { name: 'views', type: 'int', nullable: false, defaultValue: '0' }, after: 'title' });
+  assert.equal(res.status, 200, res.body.message);
+  assert.ok(calls.some((c) => c.includes('ADD COLUMN \\`views\\` int NOT NULL DEFAULT 0 AFTER \\`title\\`')));
+
+  res = await request(app).put('/api/servers/srv1/databases/app_blog/tables/posts/columns/views').set(a)
+    .send({ column: { name: 'view_count', type: 'bigint', nullable: true } });
+  assert.equal(res.status, 200, res.body.message);
+  assert.ok(calls.some((c) => c.includes('CHANGE COLUMN \\`views\\` \\`view_count\\` bigint NULL')));
+
+  res = await request(app).delete('/api/servers/srv1/databases/app_blog/tables/posts/columns/view_count').set(a)
+    .send({ confirm: true });
+  assert.equal(res.status, 200);
+  assert.ok(calls.some((c) => c.includes('DROP COLUMN \\`view_count\\`')));
+});
+
+test('插入行转义单引号与反斜杠', async () => {
+  const { app, calls } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/databases/app_blog/tables/posts/rows').set(await auth(app))
+    .send({ data: { title: "it's a \\test", views: null } });
+  assert.equal(res.status, 200, res.body.message);
+  const sql = calls.find((c) => c.includes('INSERT INTO'));
+  assert.ok(sql.includes("\\`title\\`, \\`views\\`"));
+  assert.ok(sql.includes("VALUES ('it''s a \\\\\\\\test', NULL)"));
+});
+
+test('更新行使用空值安全比较且拒绝空 where', async () => {
+  const { app, calls } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const a = await auth(app);
+  const bad = await request(app).put('/api/servers/srv1/databases/app_blog/tables/posts/rows').set(a)
+    .send({ where: {}, data: { title: 'x' } });
+  assert.equal(bad.status, 400);
+  const res = await request(app).put('/api/servers/srv1/databases/app_blog/tables/posts/rows').set(a)
+    .send({ where: { id: '3', note: null }, data: { title: 'new' } });
+  assert.equal(res.status, 200, res.body.message);
+  const sql = calls.find((c) => c.includes('UPDATE'));
+  assert.ok(sql.includes("SET \\`title\\` = 'new'"));
+  assert.ok(sql.includes("\\`id\\` <=> '3' AND \\`note\\` <=> NULL"));
+});
+
+test('删除行需确认且带 where', async () => {
+  const { app, calls } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const a = await auth(app);
+  const noConfirm = await request(app).delete('/api/servers/srv1/databases/app_blog/tables/posts/rows').set(a)
+    .send({ where: { id: '3' } });
+  assert.equal(noConfirm.status, 400);
+  const res = await request(app).delete('/api/servers/srv1/databases/app_blog/tables/posts/rows').set(a)
+    .send({ confirm: true, where: { id: '3' } });
+  assert.equal(res.status, 200);
+  assert.ok(calls.some((c) => c.includes('DELETE FROM \\`app_blog\\`.\\`posts\\` WHERE \\`id\\` <=> ')));
+});
+
+test('行操作非法字段名拒绝', async () => {
+  const { app, calls } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).put('/api/servers/srv1/databases/app_blog/tables/posts/rows').set(await auth(app))
+    .send({ where: { 'id` OR 1=1 --': '1' }, data: { title: 'x' } });
+  assert.equal(res.status, 400);
+  assert.ok(!calls.some((c) => c.includes('UPDATE')));
+});

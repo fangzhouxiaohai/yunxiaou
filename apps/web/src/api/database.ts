@@ -74,3 +74,48 @@ export function tableRows(serverId: string, db: string, table: string, page: num
 export function execSql(serverId: string, db: string, sql: string, confirm?: boolean) {
   return request.post(`/servers/${serverId}/sql`, { db, sql, confirm }) as Promise<BatchResult>
 }
+
+// ===== 表/字段/行管理 =====
+
+export interface ColumnDef {
+  name: string
+  type: string
+  length?: string
+  nullable?: boolean
+  primary?: boolean
+  autoIncrement?: boolean
+  defaultValue?: string
+  comment?: string
+}
+
+export function createTable(serverId: string, db: string, payload: { table: string; columns: ColumnDef[]; engine?: string; charset?: string; comment?: string }) {
+  return request.post(`/servers/${serverId}/databases/${db}/tables`, payload)
+}
+
+export function dropTable(serverId: string, db: string, table: string, confirm: boolean) {
+  return request.delete(`/servers/${serverId}/databases/${db}/tables/${table}`, { data: { confirm } })
+}
+
+export function addColumn(serverId: string, db: string, table: string, payload: { column: ColumnDef; after?: string }) {
+  return request.post(`/servers/${serverId}/databases/${db}/tables/${table}/columns`, payload)
+}
+
+export function modifyColumn(serverId: string, db: string, table: string, col: string, payload: { column: ColumnDef }) {
+  return request.put(`/servers/${serverId}/databases/${db}/tables/${table}/columns/${col}`, payload)
+}
+
+export function dropColumn(serverId: string, db: string, table: string, col: string, confirm: boolean) {
+  return request.delete(`/servers/${serverId}/databases/${db}/tables/${table}/columns/${col}`, { data: { confirm } })
+}
+
+export function insertRow(serverId: string, db: string, table: string, data: Record<string, string | null>) {
+  return request.post(`/servers/${serverId}/databases/${db}/tables/${table}/rows`, { data })
+}
+
+export function updateRow(serverId: string, db: string, table: string, where: Record<string, string | null>, data: Record<string, string | null>) {
+  return request.put(`/servers/${serverId}/databases/${db}/tables/${table}/rows`, { where, data })
+}
+
+export function deleteRow(serverId: string, db: string, table: string, where: Record<string, string | null>, confirm: boolean) {
+  return request.delete(`/servers/${serverId}/databases/${db}/tables/${table}/rows`, { data: { where, confirm } })
+}
