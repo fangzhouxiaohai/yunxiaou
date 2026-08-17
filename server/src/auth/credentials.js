@@ -37,7 +37,7 @@ function createCredentials({ dataDir, envUser, envPassword }) {
     } catch {
       // 解析失败按损坏处理
     }
-    console.error(`[auth] 警告：${file} 已损坏或字段不完整，已拒绝所有登录；请修复文件，或由管理员在线修改密码覆盖损坏文件`);
+    console.error(`[auth] 警告：${file} 已损坏或字段不完整，已拒绝所有登录；请修复该文件，或删除它回退到环境变量/默认密码`);
     return { state: 'corrupt' };
   }
 
