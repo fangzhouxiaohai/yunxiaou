@@ -21,6 +21,12 @@
         <el-menu-item index="/store">
           <el-icon><Shop /></el-icon><span>软件商店</span>
         </el-menu-item>
+        <el-menu-item index="/disk">
+          <el-icon><Files /></el-icon><span>磁盘管理</span>
+        </el-menu-item>
+        <el-menu-item index="/supervisor">
+          <el-icon><Cpu /></el-icon><span>进程守护</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>
@@ -60,7 +66,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Odometer, Monitor, Coin, Shop, ArrowDown } from '@element-plus/icons-vue'
+import { Odometer, Monitor, Coin, Shop, Files, Cpu, ArrowDown } from '@element-plus/icons-vue'
 import { useServerStore } from '@/stores/server'
 import { useUserStore } from '@/stores/user'
 

@@ -33,6 +33,18 @@ const router = createRouter({
           component: () => import('@/views/store/index.vue'),
           meta: { title: '软件商店' },
         },
+        {
+          path: 'disk',
+          name: 'Disk',
+          component: () => import('@/views/disk/index.vue'),
+          meta: { title: '磁盘管理' },
+        },
+        {
+          path: 'supervisor',
+          name: 'Supervisor',
+          component: () => import('@/views/supervisor/index.vue'),
+          meta: { title: '进程守护' },
+        },
       ],
     },
   ],
