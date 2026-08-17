@@ -1,0 +1,36 @@
+import { createRouter, createWebHistory } from 'vue-router'
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes: [
+    { path: '/login', component: () => import('@/views/login/index.vue') },
+    {
+      path: '/',
+      component: () => import('@/layout/index.vue'),
+      redirect: '/dashboard',
+      children: [
+        {
+          path: 'dashboard',
+          name: 'Dashboard',
+          component: () => import('@/views/dashboard/index.vue'),
+          meta: { title: '监控大盘' },
+        },
+        {
+          path: 'servers',
+          name: 'Servers',
+          component: () => import('@/views/servers/index.vue'),
+          meta: { title: '服务器管理' },
+        },
+      ],
+    },
+  ],
+})
+
+router.beforeEach((to) => {
+  const token = localStorage.getItem('linuxmgr_token')
+  if (!token && to.path !== '/login') return '/login'
+  if (token && to.path === '/login') return '/'
+  return true
+})
+
+export default router
