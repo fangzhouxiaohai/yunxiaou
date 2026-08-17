@@ -2,7 +2,7 @@ const express = require('express');
 const { decrypt } = require('../crypto/cipher');
 const { audit } = require('../utils/audit');
 
-const PATH_RE = /^\/[a-zA-Z0-9_/.-]{1,200}$/;
+const PATH_RE = /^\/$|^\/[a-zA-Z0-9_/.-]{1,200}$/;
 const NAME_RE = /^[a-zA-Z0-9._-]{1,100}$/;
 const MODE_RE = /^[0-7]{3,4}$/;
 // 危险路径：读写均禁止
