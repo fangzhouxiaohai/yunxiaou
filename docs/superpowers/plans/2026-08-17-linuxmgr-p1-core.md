@@ -2,7 +2,7 @@
 
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
-**目标：** 实现第一里程碑：JWT 登录、服务器 CRUD（SSH 凭据 AES-256-GCM 加密存储）、SSH 长连接池、监控大盘（CPU/内存/磁盘/网络/负载/系统信息），并连真实服务器 `43.240.221.112` 验证通过。
+**目标：** 实现第一里程碑：JWT 登录、服务器 CRUD（SSH 凭据 AES-256-GCM 加密存储）、SSH 长连接池、监控大盘（CPU/内存/磁盘/网络/负载/系统信息）、数据库管理（MySQL + Redis）、软件商店（8 个常用软件），并连真实服务器 `43.240.221.112` 验证通过。
 
 **架构：** Express 后端（`server/`）+ Vue 3 前端（`apps/web/`）。后端为每台服务器维护常驻 SSH 连接（ssh2），带自动重连、空闲回收、并发队列；数据存本地 JSON（`server/data/`），密码加密；JWT 保护所有 API。
 
@@ -35,17 +35,20 @@
 - 创建：`server/src/routes/auth.js` — 登录（含失败限速）
 - 创建：`server/src/routes/servers.js` — 服务器 CRUD + 连接测试
 - 创建：`server/src/routes/monitor.js` — 监控数据
+- 创建：`server/src/routes/database.js` — 数据库管理（MySQL + Redis）
+- 创建：`server/src/routes/store.js` — 软件商店
+- 创建：`server/src/utils/dbParser.js` — SHOW DATABASES / redis INFO 输出解析
 - 创建：`server/src/index.js` — Express 组装与启动
 - 测试：`server/test/*.test.js`、`server/test/helpers/fakeClient.js`
 
 **前端 `apps/web/`：**
 - 创建：`apps/web/package.json`、`apps/web/vite.config.ts`、`apps/web/tsconfig.json`、`apps/web/tsconfig.node.json`、`apps/web/index.html`、`apps/web/src/env.d.ts`
 - 创建：`apps/web/src/main.ts`、`apps/web/src/App.vue`、`apps/web/src/styles/index.scss`
-- 创建：`apps/web/src/api/request.ts`、`apps/web/src/api/auth.ts`、`apps/web/src/api/servers.ts`、`apps/web/src/api/monitor.ts`
+- 创建：`apps/web/src/api/request.ts`、`apps/web/src/api/auth.ts`、`apps/web/src/api/servers.ts`、`apps/web/src/api/monitor.ts`、`apps/web/src/api/database.ts`、`apps/web/src/api/store.ts`
 - 创建：`apps/web/src/stores/user.ts`、`apps/web/src/stores/server.ts`
 - 创建：`apps/web/src/router/index.ts`
 - 创建：`apps/web/src/layout/index.vue`
-- 创建：`apps/web/src/views/login/index.vue`、`apps/web/src/views/dashboard/index.vue`、`apps/web/src/views/servers/index.vue`
+- 创建：`apps/web/src/views/login/index.vue`、`apps/web/src/views/dashboard/index.vue`、`apps/web/src/views/servers/index.vue`、`apps/web/src/views/databases/index.vue`、`apps/web/src/views/store/index.vue`
 
 ---
 
@@ -2705,9 +2708,1045 @@ git commit -m "feat: 监控大盘页面（ECharts 实时图表）"
 
 ---
 
-### 任务 14：真实服务器端到端验证
+### 任务 14：数据库管理后端（MySQL + Redis）
 
-**前置：** 用户提供的测试服务器 `43.240.221.112`（root）。本任务只执行**只读命令**，遵守硬性约束 8.1。
+**文件：**
+- 创建：`server/src/utils/dbParser.js`
+- 创建：`server/src/routes/database.js`
+- 测试：`server/test/dbParser.test.js`
+- 测试：`server/test/database.test.js`（mock pool 集成）
+
+- [ ] **步骤 1：编写失败的解析器测试**
+
+`server/test/dbParser.test.js`：
+
+```js
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { parseDatabases, parseRedisInfo } = require('../src/utils/dbParser');
+
+const DB_OUTPUT = `Database
+information_schema
+mysql
+performance_schema
+sys
+app_blog
+app_shop
+`;
+
+const REDIS_INFO = `# Server
+redis_version:7.0.15
+redis_mode:standalone
+os:Linux 5.15.0-91-generic x86_64
+# Clients
+connected_clients:3
+blocked_clients:0
+# Memory
+used_memory:1048576
+used_memory_human:1.00M
+maxmemory:0
+# Stats
+total_connections_received:1234
+total_commands_processed:5678
+keyspace_hits:100
+keyspace_misses:20
+# Keyspace
+db0:keys=42,expires=10,avg_ttl=0
+db1:keys=7,expires=0,avg_ttl=0
+`;
+
+test('解析 SHOW DATABASES 输出', () => {
+  const dbs = parseDatabases(DB_OUTPUT);
+  assert.deepEqual(dbs, ['information_schema', 'mysql', 'performance_schema', 'sys', 'app_blog', 'app_shop']);
+});
+
+test('解析 redis INFO 输出', () => {
+  const info = parseRedisInfo(REDIS_INFO);
+  assert.equal(info.version, '7.0.15');
+  assert.equal(info.mode, 'standalone');
+  assert.equal(info.connectedClients, 3);
+  assert.equal(info.usedMemory, 1048576);
+  assert.equal(info.totalConnections, 1234);
+  assert.equal(info.totalCommands, 5678);
+  assert.equal(info.hitRate, 83); // 100/(100+20) 取整
+  assert.equal(info.totalKeys, 49); // 42+7
+  assert.deepEqual(info.databases, [{ db: 'db0', keys: 42, expires: 10 }, { db: 'db1', keys: 7, expires: 0 }]);
+});
+
+test('空输出返回空结构', () => {
+  assert.deepEqual(parseDatabases(''), []);
+  const info = parseRedisInfo('');
+  assert.equal(info.version, '');
+  assert.equal(info.totalKeys, 0);
+});
+```
+
+- [ ] **步骤 2：运行测试验证失败**
+
+运行：`node --test test/dbParser.test.js`
+预期：FAIL，`Cannot find module '../src/utils/dbParser'`
+
+- [ ] **步骤 3：实现 dbParser.js**
+
+`server/src/utils/dbParser.js`：
+
+```js
+function parseDatabases(output) {
+  return output
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && l !== 'Database');
+}
+
+function parseRedisInfo(output) {
+  const lines = output.split('\n');
+  const kv = {};
+  for (const line of lines) {
+    const m = line.match(/^([a-zA-Z_0-9]+):(.*)$/);
+    if (m) kv[m[1]] = m[2];
+  }
+  const hits = parseInt(kv.keyspace_hits || '0', 10);
+  const misses = parseInt(kv.keyspace_misses || '0', 10);
+  const databases = [];
+  for (const [key, value] of Object.entries(kv)) {
+    if (key.startsWith('db') && /^\d+$/.test(key.slice(2))) {
+      const m = value.match(/^keys=(\d+),expires=(\d+)/);
+      if (m) databases.push({ db: key, keys: parseInt(m[1], 10), expires: parseInt(m[2], 10) });
+    }
+  }
+  return {
+    version: kv.redis_version || '',
+    mode: kv.redis_mode || '',
+    connectedClients: parseInt(kv.connected_clients || '0', 10),
+    usedMemory: parseInt(kv.used_memory || '0', 10),
+    totalConnections: parseInt(kv.total_connections_received || '0', 10),
+    totalCommands: parseInt(kv.total_commands_processed || '0', 10),
+    hitRate: hits + misses > 0 ? Math.round((hits / (hits + misses)) * 100) : 0,
+    totalKeys: databases.reduce((sum, d) => sum + d.keys, 0),
+    databases,
+  };
+}
+
+module.exports = { parseDatabases, parseRedisInfo };
+```
+
+- [ ] **步骤 4：运行测试验证通过**
+
+运行：`node --test test/dbParser.test.js`
+预期：PASS（3 个测试）
+
+- [ ] **步骤 5：编写失败的集成测试（mock pool）**
+
+`server/test/database.test.js`：
+
+```js
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const request = require('supertest');
+const { createApp } = require('../src/index');
+const { loadConfig } = require('../src/config');
+const { JsonStore } = require('../src/store/jsonStore');
+const { encrypt } = require('../src/crypto/cipher');
+
+function makePool(scripted) {
+  const calls = [];
+  const pool = {
+    async run(cfg, command, opts) {
+      calls.push(command);
+      const handler = scripted[command] || scripted.default;
+      if (handler) return handler();
+      return { code: 0, stdout: '', stderr: '' };
+    },
+    closeKey: () => {},
+  };
+  return { pool, calls };
+}
+
+const DB_OUTPUT = `Database\ninformation_schema\nmysql\nperformance_schema\nsys\napp_blog\n`;
+
+function setup(scripted = {}) {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'linuxmgr-db-'));
+  const { config } = loadConfig({
+    JWT_SECRET: 's', MASTER_KEY: 'k', ADMIN_USER: 'admin', ADMIN_PASSWORD: 'pw', DATA_DIR: dataDir,
+  });
+  const stores = { servers: new JsonStore(dataDir, 'servers.json', []) };
+  stores.servers.write([{
+    id: 'srv1', name: '测试机', host: '10.0.0.1', port: 22, username: 'root',
+    passwordEnc: encrypt('p', 'k'), createdAt: new Date().toISOString(),
+  }]);
+  const { pool, calls } = makePool(scripted);
+  const app = createApp({ config, pool, stores });
+  return { app, config, stores, pool, calls };
+}
+
+async function auth(app) {
+  const res = await request(app).post('/api/auth/login').send({ username: 'admin', password: 'pw' });
+  return { Authorization: `Bearer ${res.body.data.token}` };
+}
+
+test('数据库列表', async () => {
+  const { app, calls } = setup({
+    default: () => ({ code: 0, stdout: DB_OUTPUT, stderr: '' }),
+  });
+  const res = await request(app).get('/api/servers/srv1/databases').set(await auth(app));
+  assert.equal(res.status, 200);
+  assert.ok(res.body.data.includes('app_blog'));
+  assert.ok(calls.some((c) => c.includes('SHOW DATABASES')));
+});
+
+test('创建数据库+用户+授权', async () => {
+  const { app, calls } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/databases').set(await auth(app))
+    .send({ name: 'app_new', username: 'app_new_user', password: 'DbPass123!' });
+  assert.equal(res.status, 200);
+  const joined = calls.join(' ');
+  assert.ok(joined.includes('CREATE DATABASE `app_new`'));
+  assert.ok(joined.includes('CREATE USER'));
+  assert.ok(joined.includes('GRANT ALL PRIVILEGES ON `app_new`.*'));
+});
+
+test('删除数据库前自动备份', async () => {
+  const { app, calls } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).delete('/api/servers/srv1/databases/app_old').set(await auth(app))
+    .send({ confirm: true });
+  assert.equal(res.status, 200);
+  const joined = calls.join(' ');
+  assert.ok(joined.includes('mysqldump'), '删除前应备份');
+  assert.ok(joined.includes('/tmp/linuxmgr-db-backup'));
+  assert.ok(joined.includes('DROP DATABASE `app_old`'));
+});
+
+test('删除数据库未确认时拒绝', async () => {
+  const { app } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).delete('/api/servers/srv1/databases/app_old').set(await auth(app))
+    .send({ confirm: false });
+  assert.equal(res.status, 400);
+});
+
+test('Redis 状态', async () => {
+  const { app } = setup({
+    default: () => ({
+      code: 0,
+      stdout: 'redis_version:7.0.15\nconnected_clients:3\nused_memory:1048576\nkeyspace_hits:10\nkeyspace_misses:2\ndb0:keys=5,expires=0,avg_ttl=0\n',
+      stderr: '',
+    }),
+  });
+  const res = await request(app).get('/api/servers/srv1/redis').set(await auth(app));
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.version, '7.0.15');
+  assert.equal(res.body.data.totalKeys, 5);
+});
+
+test('Redis 清空需确认且审计', async () => {
+  const { app, calls, config } = setup({ default: () => ({ code: 0, stdout: 'OK', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/redis/flush').set(await auth(app))
+    .send({ confirm: true });
+  assert.equal(res.status, 200);
+  assert.ok(calls.some((c) => c.includes('FLUSHDB')));
+  const auditLog = fs.readFileSync(path.join(config.dataDir, 'audit.log'), 'utf8');
+  assert.ok(auditLog.includes('redis.flush'));
+});
+```
+
+- [ ] **步骤 6：运行测试验证失败**
+
+运行：`node --test test/database.test.js`
+预期：FAIL，数据库路由 404（路由尚未挂载）
+
+- [ ] **步骤 7：实现 database.js 路由并挂载**
+
+`server/src/routes/database.js`：
+
+```js
+const express = require('express');
+const { decrypt } = require('../crypto/cipher');
+const { parseDatabases, parseRedisInfo } = require('../utils/dbParser');
+const { audit } = require('../utils/audit');
+
+const DB_NAME_RE = /^[a-zA-Z0-9_]{1,64}$/;
+const USER_NAME_RE = /^[a-zA-Z0-9_]{1,32}$/;
+
+function createDatabaseRouter({ config, pool, store }) {
+  const router = express.Router();
+
+  const findServer = (id) => store.read().find((s) => s.id === id);
+
+  function passwordOf(server, field, res) {
+    if (!server[field]) return null; // 未配置则用 sudo/无密码方式
+    try {
+      return decrypt(server[field], config.masterKey);
+    } catch {
+      res.status(500).json({ code: 500, message: '凭据解密失败：MASTER_KEY 与保存时不一致' });
+      return undefined; // 区分"未配置"(null) 与 "解密失败"(undefined)
+    }
+  }
+
+  // mysql 客户端命令前缀：配置了密码用 -p，否则尝试 sudo mysql
+  function mysqlCmd(server, sql, res) {
+    const pwd = passwordOf(server, 'mysqlPasswordEnc', res);
+    if (pwd === undefined) return null;
+    if (pwd) return `mysql -u root -p'${pwd.replace(/'/g, "'\\''")}' -N -e "${sql}"`;
+    return `sudo mysql -N -e "${sql}"`;
+  }
+
+  router.get('/servers/:id/databases', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const cmd = mysqlCmd(server, 'SHOW DATABASES', res);
+    if (cmd === null) return;
+    try {
+      const result = await pool.run(
+        { host: server.host, port: server.port, username: server.username, password: passwordOf(server, 'passwordEnc', res) },
+        cmd
+      );
+      if (result.code !== 0) throw new Error(result.stderr.slice(0, 200) || `退出码 ${result.code}`);
+      res.json({ code: 0, data: parseDatabases(result.stdout) });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `获取数据库列表失败: ${err.message}` });
+    }
+  });
+
+  router.post('/servers/:id/databases', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const { name, username, password } = req.body || {};
+    if (!name || !DB_NAME_RE.test(name)) return res.status(400).json({ code: 400, message: '数据库名不合法（字母/数字/下划线，1-64 位）' });
+    if (username && !USER_NAME_RE.test(username)) return res.status(400).json({ code: 400, message: '用户名不合法' });
+    if (!username || !password) return res.status(400).json({ code: 400, message: '请提供用户名和密码' });
+    const sshCfg = { host: server.host, port: server.port, username: server.username, password: passwordOf(server, 'passwordEnc', res) };
+    const cmds = [
+      `CREATE DATABASE IF NOT EXISTS \`${name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE USER IF NOT EXISTS '${username}'@'localhost' IDENTIFIED BY '${password.replace(/'/g, "'\\''")}'`,
+      `GRANT ALL PRIVILEGES ON \`${name}\`.* TO '${username}'@'localhost'`,
+      'FLUSH PRIVILEGES',
+    ];
+    try {
+      for (const sql of cmds) {
+        const cmd = mysqlCmd(server, sql, res);
+        if (cmd === null) return;
+        const result = await pool.run(sshCfg, cmd);
+        if (result.code !== 0) throw new Error(result.stderr.slice(0, 200) || `退出码 ${result.code}`);
+      }
+      audit(config.dataDir, { action: 'database.create', target: server.host, detail: name, result: 'success' });
+      res.json({ code: 0, data: { name, username } });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `创建数据库失败: ${err.message}` });
+    }
+  });
+
+  router.delete('/servers/:id/databases/:name', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (req.body?.confirm !== true) return res.status(400).json({ code: 400, message: '危险操作需确认（confirm: true）' });
+    const name = req.params.name;
+    if (!DB_NAME_RE.test(name)) return res.status(400).json({ code: 400, message: '数据库名不合法' });
+    const sshCfg = { host: server.host, port: server.port, username: server.username, password: passwordOf(server, 'passwordEnc', res) };
+    try {
+      const backupDir = '/tmp/linuxmgr-db-backup';
+      const backupCmd = `mkdir -p ${backupDir} && ${mysqlCmd(server, `SELECT 1`, res).replace('mysql', 'mysqldump').replace(/-N -e/, '')} \`${name}\` > ${backupDir}/${name}-$(date +%Y%m%d%H%M%S).sql`;
+      const backup = await pool.run(sshCfg, backupCmd);
+      if (backup.code !== 0) throw new Error(`备份失败: ${backup.stderr.slice(0, 200)}`);
+      const cmd = mysqlCmd(server, `DROP DATABASE \`${name}\``, res);
+      const drop = await pool.run(sshCfg, cmd);
+      if (drop.code !== 0) throw new Error(drop.stderr.slice(0, 200));
+      audit(config.dataDir, { action: 'database.drop', target: server.host, detail: name, result: 'success' });
+      res.json({ code: 0, data: { dropped: name } });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `删除数据库失败: ${err.message}` });
+    }
+  });
+
+  router.get('/servers/:id/redis', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const pwd = passwordOf(server, 'redisPasswordEnc', res);
+    if (pwd === undefined) return;
+    const authPart = pwd ? `-a '${pwd.replace(/'/g, "'\\''")}'` : '';
+    const sshCfg = { host: server.host, port: server.port, username: server.username, password: passwordOf(server, 'passwordEnc', res) };
+    try {
+      const result = await pool.run(sshCfg, `redis-cli ${authPart} INFO`);
+      if (result.code !== 0) throw new Error(result.stderr.slice(0, 200) || `退出码 ${result.code}`);
+      res.json({ code: 0, data: parseRedisInfo(result.stdout) });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `获取 Redis 状态失败: ${err.message}` });
+    }
+  });
+
+  router.get('/servers/:id/redis/keys', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const pwd = passwordOf(server, 'redisPasswordEnc', res);
+    if (pwd === undefined) return;
+    const authPart = pwd ? `-a '${pwd.replace(/'/g, "'\\''")}'` : '';
+    const sshCfg = { host: server.host, port: server.port, username: server.username, password: passwordOf(server, 'passwordEnc', res) };
+    try {
+      const result = await pool.run(sshCfg, `redis-cli ${authPart} --scan --count 100`);
+      if (result.code !== 0) throw new Error(result.stderr.slice(0, 200) || `退出码 ${result.code}`);
+      const keys = result.stdout.split('\n').map((k) => k.trim()).filter(Boolean);
+      res.json({ code: 0, data: keys });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `获取 Redis 键列表失败: ${err.message}` });
+    }
+  });
+
+  router.post('/servers/:id/redis/flush', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (req.body?.confirm !== true) return res.status(400).json({ code: 400, message: '危险操作需确认（confirm: true）' });
+    const pwd = passwordOf(server, 'redisPasswordEnc', res);
+    if (pwd === undefined) return;
+    const authPart = pwd ? `-a '${pwd.replace(/'/g, "'\\''")}'` : '';
+    const sshCfg = { host: server.host, port: server.port, username: server.username, password: passwordOf(server, 'passwordEnc', res) };
+    try {
+      const result = await pool.run(sshCfg, `redis-cli ${authPart} FLUSHDB`);
+      if (result.code !== 0) throw new Error(result.stderr.slice(0, 200) || `退出码 ${result.code}`);
+      audit(config.dataDir, { action: 'redis.flush', target: server.host, result: 'success' });
+      res.json({ code: 0, data: { flushed: true } });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `清空 Redis 失败: ${err.message}` });
+    }
+  });
+
+  return router;
+}
+
+module.exports = createDatabaseRouter;
+```
+
+在 `server/src/index.js` 中挂载（新增一行，位于 monitor 路由之后）：
+
+```js
+app.use('/api', requireAuth(config), createDatabaseRouter({ config, pool, store: stores.servers }));
+```
+
+- [ ] **步骤 8：运行测试验证通过**
+
+运行：`node --test test/dbParser.test.js test/database.test.js`
+预期：全部 PASS（数据库路由集成测试需先确认 `createApp` 已接收 `createDatabaseRouter` 依赖并挂载）
+
+- [ ] **步骤 9：Commit**
+
+```bash
+git add server/src/utils/dbParser.js server/src/routes/database.js server/src/index.js server/test/dbParser.test.js server/test/database.test.js
+git commit -m "feat: 数据库管理后端（MySQL 库/用户/备份删除 + Redis 状态/键/清空）"
+```
+
+---
+
+### 任务 15：软件商店后端
+
+**文件：**
+- 创建：`server/src/routes/store.js`
+- 测试：`server/test/store.test.js`（mock pool 集成）
+
+- [ ] **步骤 1：编写失败的集成测试**
+
+`server/test/store.test.js`：
+
+```js
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const request = require('supertest');
+const { createApp } = require('../src/index');
+const { loadConfig } = require('../src/config');
+const { JsonStore } = require('../src/store/jsonStore');
+const { encrypt } = require('../src/crypto/cipher');
+
+function setup(scripted) {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'linuxmgr-store-'));
+  const { config } = loadConfig({
+    JWT_SECRET: 's', MASTER_KEY: 'k', ADMIN_USER: 'admin', ADMIN_PASSWORD: 'pw', DATA_DIR: dataDir,
+  });
+  const stores = { servers: new JsonStore(dataDir, 'servers.json', []) };
+  stores.servers.write([{
+    id: 'srv1', name: '测试机', host: '10.0.0.1', port: 22, username: 'root',
+    passwordEnc: encrypt('p', 'k'), createdAt: new Date().toISOString(),
+  }]);
+  const calls = [];
+  const pool = {
+    async run(cfg, command, opts) {
+      calls.push(command);
+      const handler = scripted[command] || scripted.default;
+      return handler ? handler() : { code: 0, stdout: '', stderr: '' };
+    },
+    closeKey: () => {},
+  };
+  const app = createApp({ config, pool, stores });
+  return { app, config, calls };
+}
+
+async function auth(app) {
+  const res = await request(app).post('/api/auth/login').send({ username: 'admin', password: 'pw' });
+  return { Authorization: `Bearer ${res.body.data.token}` };
+}
+
+test('软件列表返回 8 个软件及检测结果', async () => {
+  const { app, calls } = setup({
+    default: () => ({ code: 0, stdout: 'nginx version: nginx/1.24.0', stderr: '' }),
+  });
+  const res = await request(app).get('/api/servers/srv1/store').set(await auth(app));
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.length, 8);
+  const nginx = res.body.data.find((s) => s.name === 'nginx');
+  assert.equal(nginx.installed, true);
+  assert.ok(nginx.version.includes('1.24.0'));
+  assert.ok(calls.some((c) => c.includes('nginx -v')));
+});
+
+test('安装软件走包管理器并审计', async () => {
+  const { app, calls, config } = setup({
+    default: () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+  const res = await request(app).post('/api/servers/srv1/store/git/install').set(await auth(app));
+  assert.equal(res.status, 200);
+  const joined = calls.join(' ');
+  assert.ok(joined.includes('apt-get') || joined.includes('yum'), '应使用系统包管理器');
+  assert.ok(joined.includes('git'));
+  const auditLog = fs.readFileSync(path.join(config.dataDir, 'audit.log'), 'utf8');
+  assert.ok(auditLog.includes('store.install'));
+});
+
+test('未知软件名拒绝安装', async () => {
+  const { app } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/store/evil-tool/install').set(await auth(app));
+  assert.equal(res.status, 400);
+});
+```
+
+- [ ] **步骤 2：运行测试验证失败**
+
+运行：`node --test test/store.test.js`
+预期：FAIL，store 路由 404（尚未挂载）
+
+- [ ] **步骤 3：实现 store.js 路由并挂载**
+
+`server/src/routes/store.js`：
+
+```js
+const express = require('express');
+const { decrypt } = require('../crypto/cipher');
+const { audit } = require('../utils/audit');
+
+// 软件清单：name 同时是包名与命令名（统一白名单，杜绝任意命令注入）
+const SOFTWARE = [
+  { name: 'nginx', display: 'Nginx', desc: 'Web 服务器/反向代理', versionCmd: 'nginx -v 2>&1', pkg: { apt: 'nginx', yum: 'nginx' } },
+  { name: 'mysql', display: 'MySQL/MariaDB', desc: '关系型数据库', versionCmd: 'mysql --version', pkg: { apt: 'mysql-server', yum: 'mysql-server' } },
+  { name: 'redis', display: 'Redis', desc: '内存键值数据库', versionCmd: 'redis-server --version', pkg: { apt: 'redis-server', yum: 'redis' } },
+  { name: 'docker', display: 'Docker', desc: '容器引擎', versionCmd: 'docker --version', pkg: { apt: 'docker.io', yum: 'docker-ce' } },
+  { name: 'node', display: 'Node.js', desc: 'JavaScript 运行时', versionCmd: 'node -v', pkg: { apt: 'nodejs', yum: 'nodejs' } },
+  { name: 'python3', display: 'Python 3', desc: '脚本语言运行时', versionCmd: 'python3 --version', pkg: { apt: 'python3', yum: 'python3' } },
+  { name: 'git', display: 'Git', desc: '版本控制', versionCmd: 'git --version', pkg: { apt: 'git', yum: 'git' } },
+  { name: 'fail2ban', display: 'Fail2ban', desc: '暴力破解防护', versionCmd: 'fail2ban-server --version 2>&1 | head -1', pkg: { apt: 'fail2ban', yum: 'fail2ban' } },
+];
+
+function createStoreRouter({ config, pool, store }) {
+  const router = express.Router();
+
+  const findServer = (id) => store.read().find((s) => s.id === id);
+  const sshCfg = (server, res) => {
+    try {
+      return {
+        host: server.host, port: server.port, username: server.username,
+        password: decrypt(server.passwordEnc, config.masterKey),
+      };
+    } catch {
+      res.status(500).json({ code: 500, message: '凭据解密失败：MASTER_KEY 与保存时不一致' });
+      return null;
+    }
+  };
+
+  // 检测包管理器：优先 apt-get（Debian/Ubuntu），否则 yum（RHEL 系）
+  async function detectPkgManager(cfg) {
+    const r = await pool.run(cfg, 'command -v apt-get >/dev/null 2>&1 && echo apt || echo yum');
+    return r.stdout.trim() === 'apt' ? 'apt' : 'yum';
+  }
+
+  router.get('/servers/:id/store', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const cfg = sshCfg(server, res);
+    if (!cfg) return;
+    try {
+      const pkg = await detectPkgManager(cfg);
+      const items = [];
+      for (const soft of SOFTWARE) {
+        const version = await pool.run(cfg, soft.versionCmd);
+        const installed = version.code === 0 && version.stdout.trim() !== '';
+        items.push({
+          name: soft.name,
+          display: soft.display,
+          desc: soft.desc,
+          installed,
+          version: installed ? version.stdout.trim().split('\n')[0] : '',
+          package: soft.pkg[pkg],
+        });
+      }
+      res.json({ code: 0, data: items });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `软件状态检测失败: ${err.message}` });
+    }
+  });
+
+  router.post('/servers/:id/store/:name/install', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const soft = SOFTWARE.find((s) => s.name === req.params.name);
+    if (!soft) return res.status(400).json({ code: 400, message: '未知软件' });
+    const cfg = sshCfg(server, res);
+    if (!cfg) return;
+    try {
+      const pkg = await detectPkgManager(cfg);
+      const installCmd = pkg === 'apt'
+        ? `DEBIAN_FRONTEND=noninteractive apt-get install -y ${soft.pkg.apt}`
+        : `yum install -y ${soft.pkg.yum}`;
+      const result = await pool.run(cfg, installCmd, { timeoutMs: 600000 });
+      if (result.code !== 0) throw new Error(result.stderr.slice(0, 300) || `退出码 ${result.code}`);
+      audit(config.dataDir, { action: 'store.install', target: server.host, detail: soft.name, result: 'success' });
+      res.json({ code: 0, data: { installed: soft.name, package: soft.pkg[pkg] } });
+    } catch (err) {
+      audit(config.dataDir, { action: 'store.install', target: server.host, detail: soft.name, result: 'fail', detail2: err.message });
+      res.status(502).json({ code: 502, message: `安装失败: ${err.message}` });
+    }
+  });
+
+  return router;
+}
+
+module.exports = createStoreRouter;
+```
+
+在 `server/src/index.js` 中挂载（monitor 路由之后）：
+
+```js
+app.use('/api', requireAuth(config), createStoreRouter({ config, pool, store: stores.servers }));
+```
+
+- [ ] **步骤 4：运行测试验证通过**
+
+运行：`node --test test/store.test.js`
+预期：全部 PASS
+
+- [ ] **步骤 5：Commit**
+
+```bash
+git add server/src/routes/store.js server/src/index.js server/test/store.test.js
+git commit -m "feat: 软件商店后端（8 软件状态检测 + 包管理器一键安装）"
+```
+
+---
+
+### 任务 16：数据库管理页面
+
+**文件：**
+- 创建：`apps/web/src/api/database.ts`
+- 创建：`apps/web/src/views/databases/index.vue`
+- 修改：`apps/web/src/router/index.ts`（加路由）
+- 修改：`apps/web/src/layout/index.vue`（加菜单）
+
+- [ ] **步骤 1：实现 API 模块**
+
+`apps/web/src/api/database.ts`：
+
+```ts
+import request from './request'
+
+export interface RedisInfo {
+  version: string
+  mode: string
+  connectedClients: number
+  usedMemory: number
+  totalConnections: number
+  totalCommands: number
+  hitRate: number
+  totalKeys: number
+  databases: Array<{ db: string; keys: number; expires: number }>
+}
+
+export function listDatabases(serverId: string) {
+  return request.get(`/servers/${serverId}/databases`) as Promise<string[]>
+}
+
+export function createDatabase(serverId: string, payload: { name: string; username: string; password: string }) {
+  return request.post(`/servers/${serverId}/databases`, payload)
+}
+
+export function dropDatabase(serverId: string, name: string, confirm: boolean) {
+  return request.delete(`/servers/${serverId}/databases/${name}`, { data: { confirm } })
+}
+
+export function getRedisInfo(serverId: string) {
+  return request.get(`/servers/${serverId}/redis`) as Promise<RedisInfo>
+}
+
+export function listRedisKeys(serverId: string) {
+  return request.get(`/servers/${serverId}/redis/keys`) as Promise<string[]>
+}
+
+export function flushRedis(serverId: string, confirm: boolean) {
+  return request.post(`/servers/${serverId}/redis/flush`, { confirm })
+}
+```
+
+- [ ] **步骤 2：实现页面（双 Tab：MySQL / Redis）**
+
+`apps/web/src/views/databases/index.vue`：
+
+```vue
+<template>
+  <div v-if="!serverStore.current">
+    <el-empty description="请先在「服务器管理」中添加并选择服务器" />
+  </div>
+  <el-tabs v-else v-model="activeTab">
+    <el-tab-pane label="MySQL/MariaDB" name="mysql">
+      <el-card>
+        <div class="toolbar">
+          <el-button type="primary" @click="dbDialogVisible = true">创建数据库</el-button>
+        </div>
+        <el-table :data="databases" v-loading="dbLoading">
+          <el-table-column prop="name" label="数据库名" />
+          <el-table-column label="操作" width="160">
+            <template #default="{ row }">
+              <el-button link type="danger" @click="onDropDb(row.name)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-card>
+    </el-tab-pane>
+
+    <el-tab-pane label="Redis" name="redis">
+      <el-row :gutter="16">
+        <el-col :span="6"><el-card><div class="stat"><div class="label">版本</div><div class="value">{{ redisInfo?.version || '--' }}</div></div></el-card></el-col>
+        <el-col :span="6"><el-card><div class="stat"><div class="label">内存占用</div><div class="value">{{ memText }}</div></div></el-card></el-col>
+        <el-col :span="6"><el-card><div class="stat"><div class="label">连接数</div><div class="value">{{ redisInfo?.connectedClients ?? '--' }}</div></div></el-card></el-col>
+        <el-col :span="6"><el-card><div class="stat"><div class="label">命中率</div><div class="value">{{ redisInfo ? redisInfo.hitRate + '%' : '--' }}</div></div></el-card></el-col>
+      </el-row>
+      <el-card class="row-gap">
+        <template #header>
+          <div class="redis-header">
+            <span>键列表（共 {{ redisInfo?.totalKeys ?? 0 }} 个键）</span>
+            <div>
+              <el-button size="small" @click="loadRedis">刷新</el-button>
+              <el-button size="small" type="danger" @click="onFlushRedis">清空当前库</el-button>
+            </div>
+          </div>
+        </template>
+        <el-table :data="redisKeys" v-loading="redisLoading" max-height="360">
+          <el-table-column prop="key" label="键名" />
+        </el-table>
+      </el-card>
+    </el-tab-pane>
+  </el-tabs>
+
+  <el-dialog v-model="dbDialogVisible" title="创建数据库" width="440px">
+    <el-form :model="dbForm" label-width="90px">
+      <el-form-item label="数据库名" required>
+        <el-input v-model="dbForm.name" placeholder="字母/数字/下划线" />
+      </el-form-item>
+      <el-form-item label="用户名" required>
+        <el-input v-model="dbForm.username" />
+      </el-form-item>
+      <el-form-item label="密码" required>
+        <el-input v-model="dbForm.password" type="password" show-password />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="dbDialogVisible = false">取消</el-button>
+      <el-button type="primary" :loading="dbSaving" @click="onCreateDb">创建</el-button>
+    </template>
+  </el-dialog>
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { createDatabase, dropDatabase, flushRedis, getRedisInfo, listDatabases, listRedisKeys, type RedisInfo } from '@/api/database'
+import { useServerStore } from '@/stores/server'
+
+const serverStore = useServerStore()
+const activeTab = ref('mysql')
+const databases = ref<Array<{ name: string }>>([])
+const dbLoading = ref(false)
+const dbDialogVisible = ref(false)
+const dbSaving = ref(false)
+const dbForm = reactive({ name: '', username: '', password: '' })
+const redisInfo = ref<RedisInfo | null>(null)
+const redisKeys = ref<Array<{ key: string }>>([])
+const redisLoading = ref(false)
+
+const memText = computed(() => {
+  const m = redisInfo.value?.usedMemory
+  return m === undefined ? '--' : m >= 1048576 ? `${(m / 1048576).toFixed(1)} MB` : `${Math.round(m / 1024)} KB`
+})
+
+async function loadDatabases() {
+  if (!serverStore.currentId) return
+  dbLoading.value = true
+  try {
+    const names = await listDatabases(serverStore.currentId)
+    databases.value = names.map((name) => ({ name }))
+  } finally {
+    dbLoading.value = false
+  }
+}
+
+async function loadRedis() {
+  if (!serverStore.currentId) return
+  redisLoading.value = true
+  try {
+    redisInfo.value = await getRedisInfo(serverStore.currentId)
+    const keys = await listRedisKeys(serverStore.currentId)
+    redisKeys.value = keys.map((key) => ({ key }))
+  } finally {
+    redisLoading.value = false
+  }
+}
+
+onMounted(() => {
+  loadDatabases()
+  loadRedis()
+})
+
+async function onCreateDb() {
+  if (!dbForm.name || !dbForm.username || !dbForm.password) {
+    ElMessage.warning('请填写完整信息')
+    return
+  }
+  dbSaving.value = true
+  try {
+    await createDatabase(serverStore.currentId!, { ...dbForm })
+    ElMessage.success('创建成功')
+    dbDialogVisible.value = false
+    dbForm.name = ''
+    dbForm.username = ''
+    dbForm.password = ''
+    loadDatabases()
+  } finally {
+    dbSaving.value = false
+  }
+}
+
+async function onDropDb(name: string) {
+  await ElMessageBox.confirm(
+    `将备份后删除数据库「${name}」，该操作不可恢复。`, '删除数据库', { type: 'warning' }
+  )
+  await dropDatabase(serverStore.currentId!, name, true)
+  ElMessage.success('已删除（备份在服务器 /tmp/linuxmgr-db-backup/）')
+  loadDatabases()
+}
+
+async function onFlushRedis() {
+  await ElMessageBox.confirm('将清空当前 Redis 库的所有键，不可恢复。', '清空 Redis', { type: 'warning' })
+  await flushRedis(serverStore.currentId!, true)
+  ElMessage.success('已清空')
+  loadRedis()
+}
+</script>
+
+<style scoped lang="scss">
+.toolbar { margin-bottom: 16px; }
+.row-gap { margin-top: 16px; }
+.stat {
+  .label { font-size: 13px; color: #909399; margin-bottom: 8px; }
+  .value { font-size: 20px; font-weight: 600; }
+}
+.redis-header { display: flex; justify-content: space-between; align-items: center; }
+</style>
+```
+
+- [ ] **步骤 3：加路由与菜单**
+
+`apps/web/src/router/index.ts` 的 children 中追加（servers 路由之后）：
+
+```ts
+{
+  path: 'databases',
+  name: 'Databases',
+  component: () => import('@/views/databases/index.vue'),
+  meta: { title: '数据库管理' },
+},
+```
+
+`apps/web/src/layout/index.vue` 的 el-menu 中追加（服务器管理之后）：
+
+```vue
+<el-menu-item index="/databases">
+  <el-icon><Coin /></el-icon><span>数据库管理</span>
+</el-menu-item>
+```
+
+并在 script 的图标导入中追加 `Coin`。
+
+- [ ] **步骤 4：验证**
+
+浏览器 `http://localhost:5173/databases`：MySQL Tab 显示数据库列表（真实服务器上可看到 information_schema 等系统库）；创建对话框可创建库+用户；删除有确认弹窗且先备份。Redis Tab 显示版本/内存/连接数/命中率与键列表；清空有确认弹窗。
+
+- [ ] **步骤 5：Commit**
+
+```bash
+git add apps/web/src/api/database.ts apps/web/src/views/databases apps/web/src/router/index.ts apps/web/src/layout/index.vue
+git commit -m "feat: 数据库管理页面（MySQL + Redis）"
+```
+
+---
+
+### 任务 17：软件商店页面
+
+**文件：**
+- 创建：`apps/web/src/api/store.ts`
+- 创建：`apps/web/src/views/store/index.vue`
+- 修改：`apps/web/src/router/index.ts`（加路由）
+- 修改：`apps/web/src/layout/index.vue`（加菜单）
+
+- [ ] **步骤 1：实现 API 模块**
+
+`apps/web/src/api/store.ts`：
+
+```ts
+import request from './request'
+
+export interface StoreItem {
+  name: string
+  display: string
+  desc: string
+  installed: boolean
+  version: string
+  package: string
+}
+
+export function listStore(serverId: string) {
+  return request.get(`/servers/${serverId}/store`) as Promise<StoreItem[]>
+}
+
+export function installSoftware(serverId: string, name: string) {
+  return request.post(`/servers/${serverId}/store/${name}/install`)
+}
+```
+
+- [ ] **步骤 2：实现页面（卡片网格，参照应用商店风格）**
+
+`apps/web/src/views/store/index.vue`：
+
+```vue
+<template>
+  <div v-if="!serverStore.current">
+    <el-empty description="请先在「服务器管理」中添加并选择服务器" />
+  </div>
+  <div v-else>
+    <el-row :gutter="16">
+      <el-col v-for="item in items" :key="item.name" :span="6" class="col">
+        <el-card class="soft-card">
+          <div class="soft-name">{{ item.display }}</div>
+          <div class="soft-desc">{{ item.desc }}</div>
+          <div class="soft-version">
+            <el-tag v-if="item.installed" type="success" size="small">{{ item.version || '已安装' }}</el-tag>
+            <el-tag v-else type="info" size="small">未安装</el-tag>
+          </div>
+          <el-button
+            v-if="!item.installed"
+            type="primary"
+            size="small"
+            class="soft-btn"
+            :loading="installing === item.name"
+            @click="onInstall(item)"
+          >
+            一键安装
+          </el-button>
+        </el-card>
+      </el-col>
+    </el-row>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { installSoftware, listStore, type StoreItem } from '@/api/store'
+import { useServerStore } from '@/stores/server'
+
+const serverStore = useServerStore()
+const items = ref<StoreItem[]>([])
+const installing = ref('')
+
+async function load() {
+  if (!serverStore.currentId) return
+  items.value = await listStore(serverStore.currentId)
+}
+
+onMounted(load)
+
+async function onInstall(item: StoreItem) {
+  await ElMessageBox.confirm(
+    `将通过系统包管理器安装「${item.display}」（包名 ${item.package}），安装过程可能需要数分钟。`,
+    '安装软件',
+    { type: 'warning', confirmButtonText: '开始安装' }
+  )
+  installing.value = item.name
+  try {
+    await installSoftware(serverStore.currentId!, item.name)
+    ElMessage.success('安装完成')
+    await load()
+  } finally {
+    installing.value = ''
+  }
+}
+</script>
+
+<style scoped lang="scss">
+.col { margin-bottom: 16px; }
+.soft-card {
+  .soft-name { font-size: 18px; font-weight: 600; }
+  .soft-desc { color: #909399; font-size: 13px; margin: 8px 0; min-height: 36px; }
+  .soft-version { margin-bottom: 12px; }
+  .soft-btn { width: 100%; }
+}
+</style>
+```
+
+- [ ] **步骤 3：加路由与菜单**
+
+`apps/web/src/router/index.ts` 的 children 中追加（databases 路由之后）：
+
+```ts
+{
+  path: 'store',
+  name: 'Store',
+  component: () => import('@/views/store/index.vue'),
+  meta: { title: '软件商店' },
+},
+```
+
+`apps/web/src/layout/index.vue` 的 el-menu 中追加（数据库管理之后）：
+
+```vue
+<el-menu-item index="/store">
+  <el-icon><Shop /></el-icon><span>软件商店</span>
+</el-menu-item>
+```
+
+并在 script 的图标导入中追加 `Shop`。
+
+- [ ] **步骤 4：验证**
+
+浏览器 `http://localhost:5173/store`：显示 8 个软件卡片，已安装的显示绿色标签+版本号，未安装的显示"一键安装"按钮；安装有确认弹窗。
+
+- [ ] **步骤 5：Commit**
+
+```bash
+git add apps/web/src/api/store.ts apps/web/src/views/store apps/web/src/router/index.ts apps/web/src/layout/index.vue
+git commit -m "feat: 软件商店页面（状态检测 + 一键安装）"
+```
+
+---
+
+### 任务 18：真实服务器端到端验证
+
+**前置：** 用户提供的测试服务器 `43.240.221.112`（root）。本任务只执行**只读命令**（监控、数据库列表、Redis INFO、软件状态检测均为只读），遵守硬性约束 8.1。**不执行**软件安装/数据库创建等写操作——这些留给用户后续在界面上自行触发。
 
 **文件：**
 - 创建：`server/.env`（不提交 git，gitignore 已覆盖）
@@ -2753,22 +3792,32 @@ curl.exe -s -X POST "http://localhost:3000/api/servers/$id/test" -H "Authorizati
 运行：`curl.exe -s "http://localhost:3000/api/servers/<id>/monitor" -H "Authorization: Bearer $token"`
 预期：返回 CPU/内存/磁盘/网络/负载/系统信息，且数值与 `ssh root@43.240.221.112 free -m` 手动对比一致（量级吻合即可）
 
-- [ ] **步骤 5：验证安全约束**
+- [ ] **步骤 5：验证数据库与软件商店接口（只读）**
+
+```powershell
+curl.exe -s "http://localhost:3000/api/servers/$id/databases" -H "Authorization: Bearer $token"
+curl.exe -s "http://localhost:3000/api/servers/$id/redis" -H "Authorization: Bearer $token"
+curl.exe -s "http://localhost:3000/api/servers/$id/store" -H "Authorization: Bearer $token"
+```
+
+预期：数据库列表返回系统库（information_schema/mysql 等）或 502 明确报错（服务器未装 MySQL 时提示"获取数据库列表失败"）；Redis 返回 INFO 解析结果或明确报错；软件商店返回 8 个软件及安装状态（本机若已装 nginx/git 等应显示已安装+版本）。以上均为只读命令，不修改服务器状态。
+
+- [ ] **步骤 6：验证安全约束**
 
 运行：`curl.exe -s -X POST http://localhost:3000/api/auth/login ...` 错误密码连输 5 次，第 6 次正确密码应返回 429 锁定。
 运行：`curl.exe -s http://localhost:3000/api/servers` 不带 token 应返回 401。
 检查 `server/data/audit.log`：包含 login success/fail、server.create、server.test 记录。
 
-- [ ] **步骤 6：前端验证**
+- [ ] **步骤 7：前端验证**
 
 运行（后台）：`npm run dev`（`apps/web/`）
-浏览器 `http://localhost:5173`：登录 → 服务器列表显示测试服务器 → 顶部切换器选中 → 监控大盘图表显示真实数据。
+浏览器 `http://localhost:5173`：登录 → 服务器列表显示测试服务器 → 顶部切换器选中 → 监控大盘图表显示真实数据 → 数据库管理页显示 MySQL 列表与 Redis 状态（如服务器未装对应服务则显示明确错误提示）→ 软件商店显示 8 个软件状态。
 
-- [ ] **步骤 7：确认服务器未被改动（8.1 约束检查）**
+- [ ] **步骤 8：确认服务器未被改动（8.1 约束检查）**
 
-本里程碑所有命令均为只读（`top`、`free`、`df`、`uptime`、`cat /proc/net/dev`、`uname`、`echo ok`），服务器上不会留下任何新文件、配置或规则。用 SSH 手动执行 `ls -la /etc/nginx/conf.d/ | grep linuxmgr` 确认无残留（本阶段不应有输出）。
+本里程碑所有命令均为只读（`top`、`free`、`df`、`uptime`、`cat /proc/net/dev`、`uname`、`echo ok`、`SHOW DATABASES`、`redis-cli INFO`、`--scan`、版本检测命令），服务器上不会留下任何新文件、配置或规则。用 SSH 手动执行 `ls -la /etc/nginx/conf.d/ | grep linuxmgr` 确认无残留（本阶段不应有输出）。
 
-- [ ] **步骤 8：Commit**
+- [ ] **步骤 9：Commit**
 
 ```bash
 git add server/.env.example README.md
