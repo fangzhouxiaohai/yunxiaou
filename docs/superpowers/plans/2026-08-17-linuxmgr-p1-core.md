@@ -2168,7 +2168,7 @@ export default router
 <template>
   <el-container class="layout">
     <el-aside width="220px" class="aside">
-      <div class="logo">linuxmgr</div>
+      <div class="logo">云小U</div>
       <el-menu
         router
         :default-active="$route.path"
@@ -2264,7 +2264,7 @@ function onCommand(cmd: string) {
 <template>
   <div class="login-page">
     <el-card class="login-card">
-      <h2 class="title">linuxmgr 服务器管理</h2>
+      <h2 class="title">云小U 服务器管理</h2>
       <el-form :model="form" @keyup.enter="onSubmit">
         <el-form-item>
           <el-input v-model="form.username" placeholder="用户名" size="large" />
