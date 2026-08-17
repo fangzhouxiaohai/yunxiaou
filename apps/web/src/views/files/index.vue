@@ -11,6 +11,20 @@
         <el-button size="small" @click="load">刷新</el-button>
       </div>
     </div>
+    <div class="tab-bar">
+      <div
+        v-for="tab in tabs"
+        :key="tab.id"
+        class="tab-item"
+        :class="{ active: tab.id === activeTabId }"
+        @click="switchTab(tab.id)"
+      >
+        <el-icon><Folder /></el-icon>
+        <span class="tab-name">{{ tabLabel(tab) }}</span>
+        <el-icon v-if="tabs.length > 1" class="tab-close" @click.stop="closeTab(tab.id)"><Close /></el-icon>
+      </div>
+      <el-icon class="tab-add" @click="addTab"><Plus /></el-icon>
+    </div>
     <el-card>
       <div class="toolbar">
         <el-input v-model="pathInput" class="path-input" placeholder="输入路径回车跳转，如 /www 或 /root" @keyup.enter="jumpTo">
@@ -150,9 +164,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Folder, Document, Link, UploadFilled } from '@element-plus/icons-vue'
+import { Folder, Document, Link, UploadFilled, Close, Plus } from '@element-plus/icons-vue'
 import {
   chmodFile, copyFile, deleteFile, listFiles, mkdirFile, moveFile, readFile, renameFile,
   touchFile, uploadFiles, writeFile, type FileItem,
@@ -160,7 +174,70 @@ import {
 import { useServerStore } from '@/stores/server'
 
 const serverStore = useServerStore()
-const currentPath = ref('/')
+
+// ===== 多标签页（按服务器持久化到 localStorage）=====
+interface FileTab { id: number; path: string }
+const tabs = ref<FileTab[]>([{ id: 1, path: '/' }])
+const activeTabId = ref(1)
+let nextTabId = 2
+
+const currentPath = computed({
+  get: () => tabs.value.find((t) => t.id === activeTabId.value)?.path || '/',
+  set: (p: string) => {
+    const tab = tabs.value.find((t) => t.id === activeTabId.value)
+    if (tab) tab.path = p
+  },
+})
+
+function tabLabel(tab: FileTab) {
+  if (tab.path === '/') return '根目录'
+  return tab.path.split('/').filter(Boolean).pop() || '根目录'
+}
+
+function persistTabs() {
+  if (!serverStore.currentId) return
+  localStorage.setItem(`linuxmgr_files_tabs_${serverStore.currentId}`, JSON.stringify({ tabs: tabs.value, activeTabId: activeTabId.value, nextTabId }))
+}
+
+function restoreTabs() {
+  if (!serverStore.currentId) return
+  try {
+    const raw = localStorage.getItem(`linuxmgr_files_tabs_${serverStore.currentId}`)
+    if (!raw) return
+    const data = JSON.parse(raw)
+    if (Array.isArray(data.tabs) && data.tabs.length) {
+      tabs.value = data.tabs
+      activeTabId.value = data.activeTabId || data.tabs[0].id
+      nextTabId = data.nextTabId || data.tabs.length + 1
+    }
+  } catch { /* 损坏则使用默认 */ }
+}
+
+function addTab() {
+  tabs.value.push({ id: nextTabId++, path: '/' })
+  activeTabId.value = tabs.value[tabs.value.length - 1].id
+  persistTabs()
+  load()
+}
+
+function closeTab(id: number) {
+  if (tabs.value.length <= 1) return
+  const idx = tabs.value.findIndex((t) => t.id === id)
+  tabs.value.splice(idx, 1)
+  if (activeTabId.value === id) {
+    activeTabId.value = tabs.value[Math.max(0, idx - 1)].id
+    load()
+  }
+  persistTabs()
+}
+
+function switchTab(id: number) {
+  if (activeTabId.value === id) return
+  activeTabId.value = id
+  persistTabs()
+  load()
+}
+
 const pathInput = ref('')
 const items = ref<FileItem[]>([])
 const loading = ref(false)
@@ -200,6 +277,7 @@ async function load() {
     items.value = data.items
     listError.value = data.error || ''
     pathInput.value = currentPath.value
+    persistTabs()
   } finally {
     loading.value = false
   }
@@ -403,7 +481,18 @@ async function onMoveConfirm() {
   await load()
 }
 
-onMounted(load)
+onMounted(() => {
+  restoreTabs()
+  load()
+})
+
+watch(() => serverStore.currentId, () => {
+  tabs.value = [{ id: 1, path: '/' }]
+  activeTabId.value = 1
+  nextTabId = 2
+  restoreTabs()
+  load()
+})
 </script>
 
 <style scoped lang="scss">
@@ -424,4 +513,23 @@ onMounted(load)
 .drag-item { cursor: grab; }
 .drop-target { cursor: grab; }
 .code-box { max-height: 60vh; }
+.tab-bar {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-bottom: 12px;
+  .tab-item {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border-radius: 6px; cursor: pointer;
+    background: var(--bg-card); border: 1px solid var(--border);
+    font-size: 13px; color: var(--text-2);
+    max-width: 220px;
+    .tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    &:hover { color: var(--brand); border-color: var(--brand); }
+    &.active { color: var(--brand); border-color: var(--brand); background: var(--el-color-primary-light-9); }
+  }
+  .tab-close { font-size: 12px; border-radius: 50%; &:hover { background: var(--border); color: var(--text-1); } }
+  .tab-add {
+    padding: 6px; border-radius: 6px; cursor: pointer; color: var(--text-3);
+    border: 1px dashed var(--border);
+    &:hover { color: var(--brand); border-color: var(--brand); }
+  }
+}
 </style>
