@@ -9,6 +9,7 @@ const { ConnectionPool } = require('./ssh/connectionPool');
 const createAuthRouter = require('./routes/auth');
 const createServersRouter = require('./routes/servers');
 const createMonitorRouter = require('./routes/monitor');
+const createDatabaseRouter = require('./routes/database');
 
 function createApp({ config, pool, stores }) {
   const app = express();
@@ -16,6 +17,7 @@ function createApp({ config, pool, stores }) {
 
   app.use('/api/auth', createAuthRouter({ config }));
   app.use('/api', requireAuth(config), createMonitorRouter({ config, pool, store: stores.servers }));
+  app.use('/api', requireAuth(config), createDatabaseRouter({ config, pool, store: stores.servers }));
   app.use('/api/servers', requireAuth(config), createServersRouter({ config, pool, store: stores.servers }));
 
   const webDist = path.join(__dirname, '..', '..', 'apps', 'web', 'dist');

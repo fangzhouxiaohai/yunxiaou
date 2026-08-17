@@ -1,0 +1,179 @@
+const express = require('express');
+const { decrypt } = require('../crypto/cipher');
+const { parseDatabases, parseRedisInfo } = require('../utils/dbParser');
+const { audit } = require('../utils/audit');
+
+const DB_NAME_RE = /^[a-zA-Z0-9_]{1,64}$/;
+const USER_NAME_RE = /^[a-zA-Z0-9_]{1,32}$/;
+
+function createDatabaseRouter({ config, pool, store }) {
+  const router = express.Router();
+
+  const findServer = (id) => store.read().find((s) => s.id === id);
+
+  function passwordOf(server, field, res) {
+    if (!server[field]) return null; // 未配置则用 sudo/无密码方式
+    try {
+      return decrypt(server[field], config.masterKey);
+    } catch {
+      res.status(500).json({ code: 500, message: '凭据解密失败：MASTER_KEY 与保存时不一致' });
+      return undefined; // 区分"未配置"(null) 与 "解密失败"(undefined)
+    }
+  }
+
+  function sshCfgOf(server, res) {
+    const pwd = passwordOf(server, 'passwordEnc', res);
+    if (pwd === undefined) return null;
+    return { host: server.host, port: server.port, username: server.username, password: pwd };
+  }
+
+  // mysql 认证参数：配置了密码用 -p，否则走 sudo（auth_socket）
+  function mysqlAuth(server, res) {
+    const pwd = passwordOf(server, 'mysqlPasswordEnc', res);
+    if (pwd === undefined) return null; // 解密失败
+    if (pwd) return `-u root -p'${pwd.replace(/'/g, "'\\''")}'`;
+    return ''; // sudo 模式
+  }
+
+  function mysqlCmd(server, sql, res) {
+    const auth = mysqlAuth(server, res);
+    if (auth === null) return null;
+    if (auth) return `mysql ${auth} -N -e "${sql}"`;
+    return `sudo mysql -N -e "${sql}"`;
+  }
+
+  function mysqldumpCmd(server, db, res) {
+    const auth = mysqlAuth(server, res);
+    if (auth === null) return null;
+    if (auth) return `mysqldump ${auth} --single-transaction ${db}`;
+    return `sudo mysqldump --single-transaction ${db}`;
+  }
+
+  router.get('/servers/:id/databases', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const cmd = mysqlCmd(server, 'SHOW DATABASES', res);
+    if (cmd === null) return;
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    try {
+      const result = await pool.run(cfg, cmd);
+      if (result.code !== 0) throw new Error(result.stderr.slice(0, 200) || `退出码 ${result.code}`);
+      res.json({ code: 0, data: parseDatabases(result.stdout) });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `获取数据库列表失败: ${err.message}` });
+    }
+  });
+
+  router.post('/servers/:id/databases', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const { name, username, password } = req.body || {};
+    if (!name || !DB_NAME_RE.test(name)) return res.status(400).json({ code: 400, message: '数据库名不合法（字母/数字/下划线，1-64 位）' });
+    if (username && !USER_NAME_RE.test(username)) return res.status(400).json({ code: 400, message: '用户名不合法' });
+    if (!username || !password) return res.status(400).json({ code: 400, message: '请提供用户名和密码' });
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    const cmds = [
+      `CREATE DATABASE IF NOT EXISTS \`${name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+      `CREATE USER IF NOT EXISTS '${username}'@'localhost' IDENTIFIED BY '${password.replace(/'/g, "'\\''")}'`,
+      `GRANT ALL PRIVILEGES ON \`${name}\`.* TO '${username}'@'localhost'`,
+      'FLUSH PRIVILEGES',
+    ];
+    try {
+      for (const sql of cmds) {
+        const cmd = mysqlCmd(server, sql, res);
+        if (cmd === null) return;
+        const result = await pool.run(cfg, cmd);
+        if (result.code !== 0) throw new Error(result.stderr.slice(0, 200) || `退出码 ${result.code}`);
+      }
+      audit(config.dataDir, { action: 'database.create', target: server.host, detail: name, result: 'success' });
+      res.json({ code: 0, data: { name, username } });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `创建数据库失败: ${err.message}` });
+    }
+  });
+
+  router.delete('/servers/:id/databases/:name', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (req.body?.confirm !== true) return res.status(400).json({ code: 400, message: '危险操作需确认（confirm: true）' });
+    const name = req.params.name;
+    if (!DB_NAME_RE.test(name)) return res.status(400).json({ code: 400, message: '数据库名不合法' });
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    try {
+      const backupDir = '/tmp/linuxmgr-db-backup';
+      const dump = mysqldumpCmd(server, name, res);
+      if (dump === null) return;
+      const backupCmd = `mkdir -p ${backupDir} && ${dump} > ${backupDir}/${name}-$(date +%Y%m%d%H%M%S).sql`;
+      const backup = await pool.run(cfg, backupCmd);
+      if (backup.code !== 0) throw new Error(`备份失败: ${backup.stderr.slice(0, 200)}`);
+      const cmd = mysqlCmd(server, `DROP DATABASE \`${name}\``, res);
+      const drop = await pool.run(cfg, cmd);
+      if (drop.code !== 0) throw new Error(drop.stderr.slice(0, 200));
+      audit(config.dataDir, { action: 'database.drop', target: server.host, detail: name, result: 'success' });
+      res.json({ code: 0, data: { dropped: name } });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `删除数据库失败: ${err.message}` });
+    }
+  });
+
+  router.get('/servers/:id/redis', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const pwd = passwordOf(server, 'redisPasswordEnc', res);
+    if (pwd === undefined) return;
+    const authPart = pwd ? `-a '${pwd.replace(/'/g, "'\\''")}'` : '';
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    try {
+      const result = await pool.run(cfg, `redis-cli ${authPart} INFO`);
+      if (result.code !== 0) throw new Error(result.stderr.slice(0, 200) || `退出码 ${result.code}`);
+      res.json({ code: 0, data: parseRedisInfo(result.stdout) });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `获取 Redis 状态失败: ${err.message}` });
+    }
+  });
+
+  router.get('/servers/:id/redis/keys', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const pwd = passwordOf(server, 'redisPasswordEnc', res);
+    if (pwd === undefined) return;
+    const authPart = pwd ? `-a '${pwd.replace(/'/g, "'\\''")}'` : '';
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    try {
+      const result = await pool.run(cfg, `redis-cli ${authPart} --scan --count 100`);
+      if (result.code !== 0) throw new Error(result.stderr.slice(0, 200) || `退出码 ${result.code}`);
+      const keys = result.stdout.split('\n').map((k) => k.trim()).filter(Boolean);
+      res.json({ code: 0, data: keys });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `获取 Redis 键列表失败: ${err.message}` });
+    }
+  });
+
+  router.post('/servers/:id/redis/flush', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (req.body?.confirm !== true) return res.status(400).json({ code: 400, message: '危险操作需确认（confirm: true）' });
+    const pwd = passwordOf(server, 'redisPasswordEnc', res);
+    if (pwd === undefined) return;
+    const authPart = pwd ? `-a '${pwd.replace(/'/g, "'\\''")}'` : '';
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    try {
+      const result = await pool.run(cfg, `redis-cli ${authPart} FLUSHDB`);
+      if (result.code !== 0) throw new Error(result.stderr.slice(0, 200) || `退出码 ${result.code}`);
+      audit(config.dataDir, { action: 'redis.flush', target: server.host, result: 'success' });
+      res.json({ code: 0, data: { flushed: true } });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `清空 Redis 失败: ${err.message}` });
+    }
+  });
+
+  return router;
+}
+
+module.exports = createDatabaseRouter;
