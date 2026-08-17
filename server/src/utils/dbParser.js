@@ -63,4 +63,12 @@ function parseDf(output) {
   });
 }
 
-module.exports = { parseDatabases, parseRedisInfo, parseLsblk, parseDf };
+function parseBatchResult(output) {
+  const lines = output.split('\n').filter((l) => l.trim() !== '');
+  if (lines.length === 0) return { columns: [], rows: [] };
+  const columns = lines[0].split('\t');
+  const rows = lines.slice(1).map((l) => l.split('\t'));
+  return { columns, rows };
+}
+
+module.exports = { parseDatabases, parseRedisInfo, parseLsblk, parseDf, parseBatchResult };

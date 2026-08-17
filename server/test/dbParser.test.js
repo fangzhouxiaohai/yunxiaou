@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { parseDatabases, parseRedisInfo } = require('../src/utils/dbParser');
+const { parseDatabases, parseRedisInfo, parseBatchResult } = require('../src/utils/dbParser');
 
 const DB_OUTPUT = `Database
 information_schema
@@ -55,4 +55,17 @@ test('空输出返回空结构', () => {
   const info = parseRedisInfo('');
   assert.equal(info.version, '');
   assert.equal(info.totalKeys, 0);
+});
+
+test('解析 mysql -B batch 输出（含表头）', () => {
+  const r = parseBatchResult('Field\tType\tNull\tKey\nid\tint\tNO\tPRI\nname\tvarchar(255)\tYES\t\n');
+  assert.deepEqual(r.columns, ['Field', 'Type', 'Null', 'Key']);
+  assert.equal(r.rows.length, 2);
+  assert.equal(r.rows[0][0], 'id');
+  assert.equal(r.rows[1][1], 'varchar(255)');
+});
+
+test('解析空 batch 输出', () => {
+  const r = parseBatchResult('');
+  assert.deepEqual(r, { columns: [], rows: [] });
 });

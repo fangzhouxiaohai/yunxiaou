@@ -1,10 +1,11 @@
 const express = require('express');
 const { decrypt } = require('../crypto/cipher');
-const { parseDatabases, parseRedisInfo } = require('../utils/dbParser');
+const { parseDatabases, parseRedisInfo, parseBatchResult } = require('../utils/dbParser');
 const { audit } = require('../utils/audit');
 
 const DB_NAME_RE = /^[a-zA-Z0-9_]{1,64}$/;
 const USER_NAME_RE = /^[a-zA-Z0-9_]{1,32}$/;
+const TABLE_RE = /^[a-zA-Z0-9_$]{1,64}$/;
 
 function createDatabaseRouter({ config, pool, store }) {
   const router = express.Router();
@@ -47,6 +48,29 @@ function createDatabaseRouter({ config, pool, store }) {
     if (auth === null) return null;
     if (auth) return `mysqldump ${auth} --single-transaction ${db}`;
     return `sudo mysqldump --single-transaction ${db}`;
+  }
+
+  // mysql -B batch 输出（带表头 tab 分隔），用于面板查询
+  function mysqlBatchCmd(server, sql, res) {
+    const auth = mysqlAuth(server, res);
+    if (auth === null) return null;
+    if (auth) return `mysql ${auth} -B -e "${sql}"`;
+    return `sudo mysql -B -e "${sql}"`;
+  }
+
+  // SQL 安全检查：只读放行；写操作需 confirm；无 WHERE 的全表 DELETE/UPDATE 直接拒绝
+  function sqlSafety(sql) {
+    const s = sql.trim().toLowerCase();
+    if (!s) return { allowed: false, message: 'SQL 不能为空' };
+    if (s.length > 10240) return { allowed: false, message: 'SQL 过长（最大 10KB）' };
+    const isRead = /^(select|show|describe|desc|explain)\b/.test(s);
+    const isWrite = /^(insert|update|delete|create|alter|drop|truncate|rename|grant|revoke|flush)\b/.test(s);
+    if (!isRead && !isWrite) return { allowed: false, message: '不支持的 SQL 语句类型' };
+    if (isWrite && /^(delete|update)\b/.test(s) && !/\bwhere\b/.test(s)) {
+      return { allowed: false, message: '禁止无 WHERE 条件的全表 DELETE/UPDATE' };
+    }
+    if (isWrite) return { allowed: true, needConfirm: true };
+    return { allowed: true, needConfirm: false };
   }
 
   router.get('/servers/:id/databases', async (req, res) => {
@@ -288,6 +312,104 @@ function createDatabaseRouter({ config, pool, store }) {
       res.json({ code: 0, data: { defaultService: service } });
     } catch (err) {
       res.status(502).json({ code: 502, message: `切换失败: ${err.message}` });
+    }
+  });
+
+  // ===== 数据库面板（phpMyAdmin 风格）=====
+
+  function validateDbAndTable(db, table, res) {
+    if (!db || !DB_NAME_RE.test(db)) {
+      res.status(400).json({ code: 400, message: '数据库名不合法' });
+      return false;
+    }
+    if (table && !TABLE_RE.test(table)) {
+      res.status(400).json({ code: 400, message: '表名不合法' });
+      return false;
+    }
+    return true;
+  }
+
+  router.get('/servers/:id/databases/:db/tables', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (!validateDbAndTable(req.params.db, null, res)) return;
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    const cmd = mysqlBatchCmd(server, `SHOW TABLES FROM \`${req.params.db}\``, res);
+    if (cmd === null) return;
+    try {
+      const r = await pool.run(cfg, cmd);
+      if (r.code !== 0) throw new Error(r.stderr.slice(0, 200) || `退出码 ${r.code}`);
+      const result = parseBatchResult(r.stdout);
+      res.json({ code: 0, data: result.rows.map((row) => row[0]) });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `获取表列表失败: ${err.message}` });
+    }
+  });
+
+  router.get('/servers/:id/databases/:db/tables/:table/structure', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (!validateDbAndTable(req.params.db, req.params.table, res)) return;
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    const cmd = mysqlBatchCmd(server, `DESCRIBE \`${req.params.db}\`.\`${req.params.table}\``, res);
+    if (cmd === null) return;
+    try {
+      const r = await pool.run(cfg, cmd);
+      if (r.code !== 0) throw new Error(r.stderr.slice(0, 200) || `退出码 ${r.code}`);
+      res.json({ code: 0, data: parseBatchResult(r.stdout) });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `获取表结构失败: ${err.message}` });
+    }
+  });
+
+  router.get('/servers/:id/databases/:db/tables/:table/rows', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (!validateDbAndTable(req.params.db, req.params.table, res)) return;
+    const page = Math.max(1, parseInt(req.query.page || '1', 10) || 1);
+    const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit || '100', 10) || 100));
+    const offset = (page - 1) * limit;
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    try {
+      const [countR, rowsR] = await Promise.all([
+        pool.run(cfg, mysqlCmd(server, `SELECT COUNT(*) FROM \`${req.params.db}\`.\`${req.params.table}\``, res)),
+        pool.run(cfg, mysqlBatchCmd(server, `SELECT * FROM \`${req.params.db}\`.\`${req.params.table}\` LIMIT ${limit} OFFSET ${offset}`, res)),
+      ]);
+      if (countR.code !== 0) throw new Error(countR.stderr.slice(0, 200) || `退出码 ${countR.code}`);
+      if (rowsR.code !== 0) throw new Error(rowsR.stderr.slice(0, 200) || `退出码 ${rowsR.code}`);
+      const total = parseInt(countR.stdout.trim(), 10) || 0;
+      res.json({ code: 0, data: { ...parseBatchResult(rowsR.stdout), total, page, limit } });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `获取数据失败: ${err.message}` });
+    }
+  });
+
+  router.post('/servers/:id/sql', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const { db, sql } = req.body || {};
+    if (!db || !DB_NAME_RE.test(db)) return res.status(400).json({ code: 400, message: '数据库名不合法' });
+    const safety = sqlSafety(sql || '');
+    if (!safety.allowed) return res.status(400).json({ code: 400, message: safety.message });
+    if (safety.needConfirm && req.body?.confirm !== true) {
+      return res.status(400).json({ code: 400, message: '写操作需确认（confirm: true）' });
+    }
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    const cmd = mysqlBatchCmd(server, sql, res);
+    if (cmd === null) return;
+    try {
+      const r = await pool.run(cfg, cmd, { timeoutMs: 60000 });
+      if (r.code !== 0) throw new Error(r.stderr.slice(0, 200) || `退出码 ${r.code}`);
+      if (safety.needConfirm) {
+        audit(config.dataDir, { action: 'sql.exec', target: server.host, detail: `${db}: ${sql.slice(0, 120)}`, result: 'success' });
+      }
+      res.json({ code: 0, data: parseBatchResult(r.stdout) });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `SQL 执行失败: ${err.message}` });
     }
   });
 

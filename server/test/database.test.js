@@ -190,3 +190,80 @@ test('切换默认 MySQL 实例（停其他启目标）', async () => {
   assert.ok(joined.includes('systemctl stop mariadb'), '应停止其他实例');
   assert.ok(joined.includes('systemctl start mysqld'), '应启动目标实例');
 });
+
+// ===== 数据库面板（phpMyAdmin 风格）=====
+
+const BATCH_TABLES = 'Tables_in_app_blog\nposts\nusers\n';
+const BATCH_DESCRIBE = 'Field\tType\tNull\tKey\tDefault\tExtra\nid\tint\tNO\tPRI\tNULL\t\nname\tvarchar(255)\tYES\t\tNULL\t\n';
+const BATCH_SELECT = 'id\tname\n1\thello\n2\tworld\n';
+
+test('表列表', async () => {
+  const { app } = setup({
+    'sudo mysql -B -e "SHOW TABLES FROM `app_blog`"': () => ({ code: 0, stdout: BATCH_TABLES, stderr: '' }),
+    default: () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+  const res = await request(app).get('/api/servers/srv1/databases/app_blog/tables').set(await auth(app));
+  assert.equal(res.status, 200);
+  assert.ok(res.body.data.includes('posts'));
+  assert.ok(res.body.data.includes('users'));
+});
+
+test('表结构', async () => {
+  const { app } = setup({
+    'sudo mysql -B -e "DESCRIBE `app_blog`.`posts`"': () => ({ code: 0, stdout: BATCH_DESCRIBE, stderr: '' }),
+    default: () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+  const res = await request(app).get('/api/servers/srv1/databases/app_blog/tables/posts/structure').set(await auth(app));
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.data.columns, ['Field', 'Type', 'Null', 'Key', 'Default', 'Extra']);
+  assert.equal(res.body.data.rows[0][0], 'id');
+});
+
+test('数据浏览分页', async () => {
+  const { app, calls } = setup({
+    'sudo mysql -B -e "SELECT * FROM `app_blog`.`posts` LIMIT 10 OFFSET 10"': () => ({ code: 0, stdout: BATCH_SELECT, stderr: '' }),
+    'sudo mysql -N -e "SELECT COUNT(*) FROM `app_blog`.`posts`"': () => ({ code: 0, stdout: '42\n', stderr: '' }),
+    default: () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+  const res = await request(app).get('/api/servers/srv1/databases/app_blog/tables/posts/rows?page=2&limit=10').set(await auth(app));
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.total, 42);
+  assert.deepEqual(res.body.data.columns, ['id', 'name']);
+  assert.equal(res.body.data.rows.length, 2);
+});
+
+test('执行只读 SQL', async () => {
+  const { app } = setup({
+    'sudo mysql -B -e "SELECT * FROM posts LIMIT 5"': () => ({ code: 0, stdout: BATCH_SELECT, stderr: '' }),
+    default: () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+  const res = await request(app).post('/api/servers/srv1/sql').set(await auth(app))
+    .send({ db: 'app_blog', sql: 'SELECT * FROM posts LIMIT 5' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.rows.length, 2);
+});
+
+test('执行写 SQL 未确认时拒绝', async () => {
+  const { app } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/sql').set(await auth(app))
+    .send({ db: 'app_blog', sql: 'DELETE FROM posts WHERE id=1' });
+  assert.equal(res.status, 400);
+});
+
+test('危险 SQL 无 WHERE 的 DELETE 即使确认也拒绝', async () => {
+  const { app } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/sql').set(await auth(app))
+    .send({ db: 'app_blog', sql: 'DELETE FROM posts', confirm: true });
+  assert.equal(res.status, 400);
+});
+
+test('危险 SQL DROP TABLE 需确认', async () => {
+  const { app, calls } = setup({
+    'sudo mysql -B -e "DROP TABLE `app_blog`.`old_posts`"': () => ({ code: 0, stdout: '', stderr: '' }),
+    default: () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+  const res = await request(app).post('/api/servers/srv1/sql').set(await auth(app))
+    .send({ db: 'app_blog', sql: 'DROP TABLE old_posts', confirm: true });
+  assert.equal(res.status, 200);
+  assert.ok(calls.some((c) => c.includes('DROP TABLE')));
+});
