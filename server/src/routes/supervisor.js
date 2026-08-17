@@ -31,10 +31,11 @@ function createSupervisorRouter({ config, pool, store }) {
       .filter((l) => l.trim())
       .map((line) => {
         const parts = line.trim().split(/\s+/);
+        const rawPid = (parts[3] || '').replace(/,/g, '');
         return {
           name: parts[0],
           status: parts[1] || 'UNKNOWN',
-          pid: parts[3] && /^\d+$/.test(parts[3]) ? parts[3] : '',
+          pid: /^\d+$/.test(rawPid) ? rawPid : '',
           uptime: parts.slice(4).join(' '),
         };
       });
