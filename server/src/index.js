@@ -16,6 +16,8 @@ const createDiskRouter = require('./routes/disk');
 const createProjectsRouter = require('./routes/projects');
 const createLogsRouter = require('./routes/logs');
 const createCrontabRouter = require('./routes/crontab');
+const createFilesRouter = require('./routes/files');
+const createSslRouter = require('./routes/ssl');
 
 function createApp({ config, pool, stores }) {
   const app = express();
@@ -30,6 +32,8 @@ function createApp({ config, pool, stores }) {
   app.use('/api', requireAuth(config), createProjectsRouter({ config, pool, store: stores.servers, projectStore: stores.projects }));
   app.use('/api', requireAuth(config), createLogsRouter({ config, pool, store: stores.servers }));
   app.use('/api', requireAuth(config), createCrontabRouter({ config, pool, store: stores.servers }));
+  app.use('/api', requireAuth(config), createFilesRouter({ config, pool, store: stores.servers }));
+  app.use('/api', requireAuth(config), createSslRouter({ config, pool, store: stores.servers }));
   app.use('/api/servers', requireAuth(config), createServersRouter({ config, pool, store: stores.servers }));
 
   const webDist = path.join(__dirname, '..', '..', 'apps', 'web', 'dist');
