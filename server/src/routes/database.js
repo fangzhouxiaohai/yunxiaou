@@ -408,7 +408,7 @@ function createDatabaseRouter({ config, pool, store }) {
     }
     const cfg = sshCfgOf(server, res);
     if (cfg === null) return;
-    const cmd = mysqlBatchCmd(server, sql, res);
+    const cmd = mysqlBatchCmd(server, `USE \`${db}\`; ${sql}`, res);
     if (cmd === null) return;
     try {
       const r = await pool.run(cfg, cmd, { timeoutMs: 60000 });

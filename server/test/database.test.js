@@ -234,7 +234,7 @@ test('数据浏览分页', async () => {
 
 test('执行只读 SQL', async () => {
   const { app } = setup({
-    'sudo mysql -B -e "SELECT * FROM posts LIMIT 5"': () => ({ code: 0, stdout: BATCH_SELECT, stderr: '' }),
+    'sudo mysql -B -e "USE \\`app_blog\\`; SELECT * FROM posts LIMIT 5"': () => ({ code: 0, stdout: BATCH_SELECT, stderr: '' }),
     default: () => ({ code: 0, stdout: '', stderr: '' }),
   });
   const res = await request(app).post('/api/servers/srv1/sql').set(await auth(app))
