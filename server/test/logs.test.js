@@ -98,6 +98,51 @@ test('新增计划任务（带 linuxmgr- 标记）', async () => {
   assert.ok(joined.includes('| crontab -'), '应写入 crontab');
 });
 
+test('URL GET 任务类型生成 curl 命令', async () => {
+  const { app, calls } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/crontabs').set(await auth(app))
+    .send({ expression: '*/10 * * * *', type: 'url', method: 'GET', url: 'https://example.com/ping' });
+  assert.equal(res.status, 200);
+  const joined = calls.join(' ');
+  assert.ok(joined.includes('curl -s -o /dev/null'), '应使用 curl 静默请求');
+  assert.ok(joined.includes('-X GET'), '应指定 GET');
+  assert.ok(joined.includes('https://example.com/ping'), '应包含 URL');
+  assert.ok(!joined.includes('-d '), 'GET 不应带数据');
+});
+
+test('URL POST 任务类型带数据', async () => {
+  const { app, calls } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/crontabs').set(await auth(app))
+    .send({ expression: '*/10 * * * *', type: 'url', method: 'POST', url: 'https://example.com/api', postData: 'a=1&b=2' });
+  assert.equal(res.status, 200);
+  const joined = calls.join(' ');
+  assert.ok(joined.includes('-X POST'), '应指定 POST');
+  assert.ok(joined.includes("-d 'a=1&b=2'"), '应带 POST 数据');
+});
+
+test('Python 脚本任务类型', async () => {
+  const { app, calls } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/crontabs').set(await auth(app))
+    .send({ expression: '0 3 * * *', type: 'python', scriptPath: '/opt/scripts/cleanup.py' });
+  assert.equal(res.status, 200);
+  const joined = calls.join(' ');
+  assert.ok(joined.includes('python3 /opt/scripts/cleanup.py'), '应执行 python3 脚本');
+});
+
+test('非法 URL 拒绝', async () => {
+  const { app } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/crontabs').set(await auth(app))
+    .send({ expression: '*/10 * * * *', type: 'url', method: 'GET', url: 'not-a-url' });
+  assert.equal(res.status, 400);
+});
+
+test('非法 Python 路径拒绝', async () => {
+  const { app } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/crontabs').set(await auth(app))
+    .send({ expression: '0 3 * * *', type: 'python', scriptPath: '/etc/passwd' });
+  assert.equal(res.status, 400);
+});
+
 test('非法 cron 表达式拒绝', async () => {
   const { app } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
   const res = await request(app).post('/api/servers/srv1/crontabs').set(await auth(app))

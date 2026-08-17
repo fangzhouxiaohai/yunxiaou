@@ -10,7 +10,18 @@ export function listCrontabs(serverId: string) {
   return request.get(`/servers/${serverId}/crontabs`) as Promise<CrontabEntry[]>
 }
 
-export function createCrontab(serverId: string, payload: { expression: string; command: string }) {
+export function createCrontab(
+  serverId: string,
+  payload: {
+    expression: string
+    type?: 'shell' | 'url' | 'python'
+    command?: string
+    method?: 'GET' | 'POST'
+    url?: string
+    postData?: string
+    scriptPath?: string
+  }
+) {
   return request.post(`/servers/${serverId}/crontabs`, payload)
 }
 

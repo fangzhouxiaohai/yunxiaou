@@ -26,6 +26,14 @@
 
     <el-dialog v-model="dialogVisible" title="新增计划任务" width="520px">
       <el-form label-width="100px">
+        <el-form-item label="任务类型" required>
+          <el-radio-group v-model="taskType">
+            <el-radio-button value="shell">Shell 命令</el-radio-button>
+            <el-radio-button value="url">URL 请求</el-radio-button>
+            <el-radio-button value="python">Python 脚本</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+
         <el-form-item label="执行周期" required>
           <el-radio-group v-model="period">
             <el-radio-button value="minute">每分钟</el-radio-button>
@@ -65,14 +73,34 @@
           <el-input v-model="form.expression" placeholder="分 时 日 月 周，如 0 2 * * *" />
         </el-form-item>
 
-        <el-form-item v-if="period !== 'custom'" label="命令" required>
-          <el-input v-model="form.command" placeholder="如 /usr/bin/backup.sh" />
+        <!-- Shell -->
+        <el-form-item v-if="taskType === 'shell'" label="命令" required>
+          <el-input v-model="form.command" placeholder="如 /usr/bin/backup.sh 或 node /www/app/cron.js" />
         </el-form-item>
-        <el-form-item v-if="period !== 'custom'" label="预览">
-          <el-tag>{{ expressionPreview || '请选择周期' }}</el-tag>
+
+        <!-- URL -->
+        <template v-if="taskType === 'url'">
+          <el-form-item label="请求方式" required>
+            <el-radio-group v-model="urlMethod">
+              <el-radio-button value="GET">GET</el-radio-button>
+              <el-radio-button value="POST">POST</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="URL" required>
+            <el-input v-model="urlTarget" placeholder="https://example.com/ping" />
+          </el-form-item>
+          <el-form-item v-if="urlMethod === 'POST'" label="POST 数据">
+            <el-input v-model="postData" placeholder="如 a=1&b=2（表单格式）" />
+          </el-form-item>
+        </template>
+
+        <!-- Python -->
+        <el-form-item v-if="taskType === 'python'" label="脚本路径" required>
+          <el-input v-model="form.scriptPath" placeholder="如 /opt/scripts/cleanup.py" />
         </el-form-item>
-        <el-form-item v-if="period === 'custom'" label="命令" required>
-          <el-input v-model="form.command" placeholder="如 /usr/bin/backup.sh" />
+
+        <el-form-item label="命令预览">
+          <el-tag class="preview-tag">{{ execPreview || '请选择周期与任务类型' }}</el-tag>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -94,12 +122,16 @@ const entries = ref<CrontabEntry[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
-const form = reactive({ expression: '', command: '' })
+const form = reactive({ expression: '', command: '', scriptPath: '' })
+const taskType = ref<'shell' | 'url' | 'python'>('shell')
 const period = ref('day')
 const hourMinute = ref(0)
 const dayTime = ref('02:00')
 const weekDay = ref(1)
 const monthDay = ref(1)
+const urlMethod = ref<'GET' | 'POST'>('GET')
+const urlTarget = ref('')
+const postData = ref('')
 
 // 根据周期生成 cron 表达式（用户无需手输）
 const expressionPreview = computed(() => {
@@ -111,15 +143,32 @@ const expressionPreview = computed(() => {
     case 'day': return `${m} ${h} * * *`
     case 'week': return `${m} ${h} * * ${weekDay.value}`
     case 'month': return `${m} ${h} ${monthDay.value} * *`
-    default: return ''
+    default: return form.expression.trim()
   }
+})
+
+// 执行命令预览（按任务类型）
+const execPreview = computed(() => {
+  if (taskType.value === 'shell') return form.command.trim()
+  if (taskType.value === 'python') return form.scriptPath.trim() ? `python3 ${form.scriptPath.trim()}` : ''
+  if (taskType.value === 'url') {
+    if (!urlTarget.value.trim()) return ''
+    const dataPart = urlMethod.value === 'POST' && postData.value ? ` -d '${postData.value}'` : ''
+    return `curl -s -o /dev/null -w "%{http_code}" -X ${urlMethod.value}${dataPart} '${urlTarget.value.trim()}'`
+  }
+  return ''
 })
 
 function openDialog() {
   form.expression = ''
   form.command = ''
+  form.scriptPath = ''
+  taskType.value = 'shell'
   period.value = 'day'
   dayTime.value = '02:00'
+  urlTarget.value = ''
+  postData.value = ''
+  urlMethod.value = 'GET'
   dialogVisible.value = true
 }
 
@@ -136,18 +185,42 @@ async function load() {
 onMounted(load)
 
 async function onCreate() {
-  const expression = period.value === 'custom' ? form.expression.trim() : expressionPreview.value
-  if (!expression || !form.command) {
-    ElMessage.warning('请填写完整信息')
+  const expression = expressionPreview.value
+  if (!expression) {
+    ElMessage.warning('请选择执行周期')
     return
+  }
+  // 按类型组装参数
+  const payload: Record<string, unknown> = { expression }
+  if (taskType.value === 'shell') {
+    if (!form.command.trim()) {
+      ElMessage.warning('请输入 Shell 命令')
+      return
+    }
+    payload.type = 'shell'
+    payload.command = form.command.trim()
+  } else if (taskType.value === 'url') {
+    if (!urlTarget.value.trim()) {
+      ElMessage.warning('请输入 URL')
+      return
+    }
+    payload.type = 'url'
+    payload.method = urlMethod.value
+    payload.url = urlTarget.value.trim()
+    if (urlMethod.value === 'POST' && postData.value) payload.postData = postData.value
+  } else {
+    if (!form.scriptPath.trim()) {
+      ElMessage.warning('请输入 Python 脚本路径')
+      return
+    }
+    payload.type = 'python'
+    payload.scriptPath = form.scriptPath.trim()
   }
   saving.value = true
   try {
-    await createCrontab(serverStore.currentId!, { expression, command: form.command })
+    await createCrontab(serverStore.currentId!, payload as never)
     ElMessage.success('已创建')
     dialogVisible.value = false
-    form.expression = ''
-    form.command = ''
     await load()
   } finally {
     saving.value = false
@@ -165,4 +238,5 @@ async function onDelete(row: CrontabEntry) {
 <style scoped lang="scss">
 .toolbar { margin-bottom: 16px; }
 .time-gap { margin-left: 12px; }
+.preview-tag { max-width: 100%; white-space: normal; height: auto; line-height: 1.5; word-break: break-all; }
 </style>

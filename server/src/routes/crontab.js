@@ -48,25 +48,48 @@ function createCrontabRouter({ config, pool, store }) {
   router.post('/servers/:id/crontabs', async (req, res) => {
     const server = findServer(req.params.id);
     if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
-    const { expression, command } = req.body || {};
+    const { expression, command, type, method, url, postData, scriptPath } = req.body || {};
     if (!expression || !CRON_RE.test(expression.trim())) {
       return res.status(400).json({ code: 400, message: 'cron 表达式不合法（5 段：分 时 日 月 周）' });
     }
-    if (!command || command.trim().length > 500) return res.status(400).json({ code: 400, message: '命令不合法' });
+    const taskType = type || 'shell';
+
+    // 根据任务类型生成实际执行命令
+    let execCommand = '';
+    if (taskType === 'shell') {
+      if (!command || command.trim().length > 500) return res.status(400).json({ code: 400, message: '命令不合法' });
+      execCommand = command.trim();
+    } else if (taskType === 'url') {
+      const reqMethod = (method || 'GET').toUpperCase();
+      if (!['GET', 'POST'].includes(reqMethod)) return res.status(400).json({ code: 400, message: '请求方法必须为 GET/POST' });
+      if (!url || !/^https?:\/\/[^\s'"]{1,500}$/.test(url)) return res.status(400).json({ code: 400, message: 'URL 不合法（需以 http:// 或 https:// 开头）' });
+      if (reqMethod === 'POST' && postData && postData.length > 2000) return res.status(400).json({ code: 400, message: 'POST 数据过长（最大 2KB）' });
+      // curl 静默访问，记录 HTTP 状态码；POST 带数据
+      const dataPart = reqMethod === 'POST' && postData ? `-d '${postData.replace(/'/g, "'\\''")}'` : '';
+      execCommand = `curl -s -o /dev/null -w "%{http_code}" -X ${reqMethod} ${dataPart} '${url.replace(/'/g, "'\\''")}'`;
+    } else if (taskType === 'python') {
+      if (!scriptPath || !/^\/[a-zA-Z0-9_/.-]+\.py$/.test(scriptPath)) {
+        return res.status(400).json({ code: 400, message: 'Python 脚本路径不合法（需为 .py 文件路径）' });
+      }
+      execCommand = `python3 ${scriptPath}`;
+    } else {
+      return res.status(400).json({ code: 400, message: '任务类型必须为 shell/url/python' });
+    }
+
     try {
-      assertCommandSafe(command);
+      assertCommandSafe(execCommand);
     } catch (err) {
       return res.status(400).json({ code: 400, message: err.message });
     }
     const cfg = sshCfg(server, res);
     if (!cfg) return;
     const id = `linuxmgr-${crypto.randomUUID().slice(0, 8)}`;
-    const cmd = `( crontab -l 2>/dev/null; echo "# ${id}"; echo "${expression.trim()} ${command.trim()}" ) | crontab -`;
+    const cmd = `( crontab -l 2>/dev/null; echo "# ${id}"; echo "${expression.trim()} ${execCommand}" ) | crontab -`;
     try {
       const r = await pool.run(cfg, cmd);
       if (r.code !== 0) throw new Error(r.stderr.slice(0, 200) || `退出码 ${r.code}`);
-      audit(config.dataDir, { action: 'crontab.create', target: server.host, detail: `${expression} ${command.slice(0, 80)}`, result: 'success' });
-      res.json({ code: 0, data: { id } });
+      audit(config.dataDir, { action: 'crontab.create', target: server.host, detail: `${expression} ${execCommand.slice(0, 80)}`, result: 'success' });
+      res.json({ code: 0, data: { id, execCommand } });
     } catch (err) {
       res.status(502).json({ code: 502, message: `新增计划任务失败: ${err.message}` });
     }
