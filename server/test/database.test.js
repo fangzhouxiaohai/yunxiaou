@@ -129,3 +129,64 @@ test('Redis 清空需确认且审计', async () => {
   const auditLog = fs.readFileSync(path.join(config.dataDir, 'audit.log'), 'utf8');
   assert.ok(auditLog.includes('redis.flush'));
 });
+
+test('MySQL 版本列表（已装实例 + 可安装版本）', async () => {
+  const { app } = setup({
+    'mysql --version': () => ({ code: 0, stdout: 'mysql  Ver 8.0.40 for Linux on x86_64', stderr: '' }),
+    'systemctl list-units --type=service --all 2>/dev/null | grep -Ei "mysql|mariadb"': () => ({ code: 0, stdout: 'mysqld.service loaded active running\n', stderr: '' }),
+    default: () => ({ code: 127, stdout: '', stderr: 'not found' }),
+  });
+  const res = await request(app).get('/api/servers/srv1/mysql/versions').set(await auth(app));
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.instances.length, 1);
+  assert.equal(res.body.data.instances[0].service, 'mysqld');
+  assert.equal(res.body.data.instances[0].state, 'running');
+  assert.ok(res.body.data.instances[0].version.includes('8.0'), '应带 mysql 客户端版本');
+  assert.ok(res.body.data.available.length >= 2, '应列出可安装版本');
+});
+
+test('安装 MySQL 8.0（官方源）', async () => {
+  const { app, calls } = setup({
+    'rpm -Uvh https://repo.mysql.com/mysql80-community-release-el7-7.noarch.rpm': () => ({ code: 0, stdout: '', stderr: '' }),
+    'yum install -y mysql-community-server': () => ({ code: 0, stdout: '', stderr: '' }),
+    'systemctl enable --now mysqld': () => ({ code: 0, stdout: '', stderr: '' }),
+    default: () => ({ code: 127, stdout: '', stderr: 'not found' }),
+  });
+  const res = await request(app).post('/api/servers/srv1/mysql/install').set(await auth(app))
+    .send({ version: '8.0', confirm: true });
+  assert.equal(res.status, 200);
+  const joined = calls.join(' ');
+  assert.ok(joined.includes('mysql-community-server'), '应安装 MySQL 官方包');
+});
+
+test('已存在 MySQL 实例时拒绝自动安装', async () => {
+  const { app } = setup({
+    'systemctl list-units --type=service --all 2>/dev/null | grep -Ei "mysql|mariadb"': () => ({ code: 0, stdout: 'mysqld.service loaded active running\n', stderr: '' }),
+    default: () => ({ code: 127, stdout: '', stderr: 'not found' }),
+  });
+  const res = await request(app).post('/api/servers/srv1/mysql/install').set(await auth(app))
+    .send({ version: '8.0', confirm: true });
+  assert.equal(res.status, 400);
+});
+
+test('安装 MySQL 未确认时拒绝', async () => {
+  const { app } = setup({ default: () => ({ code: 127, stdout: '', stderr: 'not found' }) });
+  const res = await request(app).post('/api/servers/srv1/mysql/install').set(await auth(app))
+    .send({ version: '8.0', confirm: false });
+  assert.equal(res.status, 400);
+});
+
+test('切换默认 MySQL 实例（停其他启目标）', async () => {
+  const { app, calls } = setup({
+    'systemctl list-units --type=service --all 2>/dev/null | grep -Ei "mysql|mariadb"': () => ({ code: 0, stdout: 'mariadb.service loaded active running\nmysqld.service loaded inactive dead\n', stderr: '' }),
+    'systemctl stop mariadb': () => ({ code: 0, stdout: '', stderr: '' }),
+    'systemctl start mysqld': () => ({ code: 0, stdout: '', stderr: '' }),
+    default: () => ({ code: 127, stdout: '', stderr: 'not found' }),
+  });
+  const res = await request(app).post('/api/servers/srv1/mysql/switch').set(await auth(app))
+    .send({ service: 'mysqld', confirm: true });
+  assert.equal(res.status, 200);
+  const joined = calls.join(' ');
+  assert.ok(joined.includes('systemctl stop mariadb'), '应停止其他实例');
+  assert.ok(joined.includes('systemctl start mysqld'), '应启动目标实例');
+});

@@ -190,6 +190,107 @@ function createDatabaseRouter({ config, pool, store }) {
     }
   });
 
+  // ===== MySQL 多版本管理 =====
+  const MYSQL_AVAILABLE = [
+    { version: '5.7', pkg: 'mysql57-community-server', rpm: 'https://repo.mysql.com/mysql57-community-release-el7-11.noarch.rpm' },
+    { version: '8.0', pkg: 'mysql-community-server', rpm: 'https://repo.mysql.com/mysql80-community-release-el7-7.noarch.rpm' },
+    { version: 'mariadb', pkg: 'mariadb-server', rpm: null },
+  ];
+  const SERVICE_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+  const LIST_SERVICES_CMD = 'systemctl list-units --type=service --all 2>/dev/null | grep -Ei "mysql|mariadb"';
+
+  function parseServices(output) {
+    return output.split('\n')
+      .filter((l) => l.trim())
+      .map((line) => {
+        const parts = line.trim().split(/\s+/);
+        return { service: parts[0].replace('.service', ''), loaded: parts[1] || '', active: parts[2] || '', state: parts[3] || '' };
+      });
+  }
+
+  router.get('/servers/:id/mysql/versions', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    try {
+      const [svc, cli] = await Promise.all([
+        pool.run(cfg, LIST_SERVICES_CMD),
+        pool.run(cfg, 'mysql --version'),
+      ]);
+      const instances = parseServices(svc.stdout || '');
+      const cliVersion = cli.code === 0 ? cli.stdout.trim().split('\n')[0] : '';
+      if (instances.length > 0 && cliVersion && instances.length === 1) {
+        instances[0].version = cliVersion;
+      }
+      res.json({ code: 0, data: { instances, available: MYSQL_AVAILABLE, client: cliVersion } });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `获取 MySQL 版本信息失败: ${err.message}` });
+    }
+  });
+
+  router.post('/servers/:id/mysql/install', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (req.body?.confirm !== true) return res.status(400).json({ code: 400, message: '危险操作需确认（confirm: true）' });
+    const version = String(req.body?.version || '');
+    const target = MYSQL_AVAILABLE.find((v) => v.version === version);
+    if (!target) return res.status(400).json({ code: 400, message: `版本必须为 ${MYSQL_AVAILABLE.map((v) => v.version).join('/')}` });
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    try {
+      // 多实例并存自动配置风险高：已有实例时拒绝自动安装（8.1 约束）
+      const svc = await pool.run(cfg, LIST_SERVICES_CMD);
+      if (parseServices(svc.stdout || '').length > 0) {
+        return res.status(400).json({ code: 400, message: '服务器已存在 MySQL/MariaDB 实例，自动安装多实例可能影响现有服务；请在人工确认后手动安装' });
+      }
+      const cmds = [];
+      if (target.rpm) cmds.push(`rpm -Uvh ${target.rpm}`);
+      cmds.push(`yum install -y ${target.pkg}`);
+      cmds.push('systemctl enable --now mysqld');
+      for (const cmd of cmds) {
+        const r = await pool.run(cfg, cmd, { timeoutMs: 600000 });
+        if (r.code !== 0) throw new Error(r.stderr.slice(0, 300) || `退出码 ${r.code}`);
+      }
+      audit(config.dataDir, { action: 'mysql.install', target: server.host, detail: version, result: 'success' });
+      res.json({ code: 0, data: { installed: version, service: 'mysqld' } });
+    } catch (err) {
+      audit(config.dataDir, { action: 'mysql.install', target: server.host, detail: version, result: 'fail', detail2: err.message });
+      if (res.headersSent) return;
+      res.status(502).json({ code: 502, message: `安装失败: ${err.message}` });
+    }
+  });
+
+  router.post('/servers/:id/mysql/switch', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (req.body?.confirm !== true) return res.status(400).json({ code: 400, message: '危险操作需确认（confirm: true）' });
+    const service = String(req.body?.service || '');
+    if (!SERVICE_RE.test(service)) return res.status(400).json({ code: 400, message: '服务名不合法' });
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    try {
+      const svc = await pool.run(cfg, LIST_SERVICES_CMD);
+      const instances = parseServices(svc.stdout || '');
+      if (instances.length === 0) return res.status(400).json({ code: 400, message: '未发现 MySQL/MariaDB 实例' });
+      if (!instances.some((i) => i.service === service)) {
+        return res.status(400).json({ code: 400, message: `未找到服务 ${service}` });
+      }
+      for (const inst of instances) {
+        if (inst.service !== service) {
+          const r = await pool.run(cfg, `systemctl stop ${inst.service}`);
+          if (r.code !== 0) throw new Error(`停止 ${inst.service} 失败: ${r.stderr.slice(0, 200)}`);
+        }
+      }
+      const start = await pool.run(cfg, `systemctl start ${service}`);
+      if (start.code !== 0) throw new Error(start.stderr.slice(0, 200) || `退出码 ${start.code}`);
+      audit(config.dataDir, { action: 'mysql.switch', target: server.host, detail: service, result: 'success' });
+      res.json({ code: 0, data: { defaultService: service } });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `切换失败: ${err.message}` });
+    }
+  });
+
   return router;
 }
 
