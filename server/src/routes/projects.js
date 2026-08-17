@@ -1,8 +1,8 @@
 const express = require('express');
-const { decrypt } = require('../crypto/cipher');
+const { encrypt, decrypt } = require('../crypto/cipher');
 const { audit } = require('../utils/audit');
 const { assertCommandSafe } = require('../ssh/exec');
-const { applyVhost, REWRITE_PRESETS, PHP_SOCK } = require('../utils/vhost');
+const { applyVhost, applyBasicAuth, REWRITE_PRESETS, PHP_SOCK } = require('../utils/vhost');
 
 const NAME_RE = /^[a-zA-Z0-9_-]{1,32}$/;
 const DIR_RE = /^\/[a-zA-Z0-9_/.-]{1,200}$/;
@@ -192,6 +192,163 @@ WantedBy=multi-user.target`;
       res.json({ code: 0, data: { deleted: name } });
     } catch (err) {
       res.status(502).json({ code: 502, message: `删除项目失败: ${err.message}` });
+    }
+  });
+
+  const IP_RE = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;
+  const REDIRECT_URL_RE = /^https?:\/\/[^\s]{1,200}$|^\/[^\s]{0,200}$/;
+  const PATH_RE = /^\/[^\s]{0,200}$/;
+  const RUNDIR_RE = /^\/[a-zA-Z0-9_\/.-]{0,100}$/;
+  const INDEX_RE = /^[a-zA-Z0-9_. ]{1,100}$/;
+  const USERNAME_RE = /^[a-zA-Z0-9_]{1,32}$/;
+  const PRESETS = ['none', 'thinkphp', 'laravel', 'wordpress', 'typecho', 'emlog', 'discuz', 'custom'];
+
+  function defaultSettings(p) {
+    return {
+      domains: Array.isArray(p.domains) && p.domains.length ? p.domains : [p.domain].filter(Boolean),
+      runDir: p.runDir || '',
+      index: p.index || 'index.php index.html',
+      rewrite: p.rewrite || { preset: 'none' },
+      antiLeech: p.antiLeech || { enabled: false, allowEmpty: true, referers: [] },
+      redirects: Array.isArray(p.redirects) ? p.redirects : [],
+      proxy: p.proxy || { enabled: false, target: '' },
+      access: p.access || { allow: [], deny: [] },
+      basicAuth: p.basicAuth ? { enabled: p.basicAuth.enabled, username: p.basicAuth.username } : { enabled: false, username: '' },
+      customSnippet: p.customSnippet || '',
+      sslDomain: p.sslDomain || '',
+      phpVersion: p.phpVersion || '',
+    };
+  }
+
+  // 校验并规范化输入；返回 { error } 或 { settings }
+  function validateSettings(input, project) {
+    const s = input || {};
+    const out = {};
+    if (s.domains !== undefined) {
+      if (!Array.isArray(s.domains) || s.domains.length > 10) return { error: '域名列表不合法（最多 10 个）' };
+      for (const d of s.domains) if (!DOMAIN_RE.test(d)) return { error: `域名不合法: ${d}` };
+      out.domains = s.domains;
+    }
+    if (s.runDir !== undefined) {
+      if (!RUNDIR_RE.test(s.runDir)) return { error: '运行目录不合法' };
+      out.runDir = s.runDir;
+    }
+    if (s.index !== undefined) {
+      if (!INDEX_RE.test(s.index)) return { error: '默认文档不合法' };
+      out.index = s.index;
+    }
+    if (s.rewrite !== undefined) {
+      const rw = s.rewrite || {};
+      if (!PRESETS.includes(rw.preset)) return { error: '伪静态预设不合法' };
+      if (rw.preset === 'custom') {
+        if (!rw.custom || String(rw.custom).length > 2000) return { error: '自定义伪静态规则不能为空且不超过 2000 字' };
+        if (String(rw.custom).includes('}')) return { error: '自定义规则不能包含 } 字符' };
+      }
+      out.rewrite = { preset: rw.preset, custom: rw.preset === 'custom' ? String(rw.custom) : undefined };
+    }
+    if (s.antiLeech !== undefined) {
+      const a = s.antiLeech || {};
+      const referers = Array.isArray(a.referers) ? a.referers : [];
+      for (const r of referers) if (!/^(\*\.)?[a-zA-Z0-9.-]{1,100}$/.test(r)) return { error: `防盗链域名不合法: ${r}` };
+      out.antiLeech = { enabled: !!a.enabled, allowEmpty: a.allowEmpty !== false, referers };
+    }
+    if (s.redirects !== undefined) {
+      if (!Array.isArray(s.redirects) || s.redirects.length > 20) return { error: '重定向规则不合法（最多 20 条）' };
+      for (const r of s.redirects) {
+        if (!PATH_RE.test(r.from || '')) return { error: `重定向来源路径不合法: ${r.from}` };
+        if (!REDIRECT_URL_RE.test(r.to || '')) return { error: `重定向目标不合法: ${r.to}` };
+        if (![301, 302].includes(Number(r.type))) return { error: '重定向类型必须为 301 或 302' };
+      }
+      out.redirects = s.redirects.map((r) => ({ from: r.from, to: r.to, type: Number(r.type) }));
+    }
+    if (s.proxy !== undefined) {
+      const pr = s.proxy || {};
+      if (pr.target && !/^https?:\/\/[a-zA-Z0-9.:-]{1,100}$/.test(pr.target)) return { error: '反向代理目标不合法' };
+      out.proxy = { enabled: !!pr.enabled, target: pr.target || '' };
+    }
+    if (s.access !== undefined) {
+      const ac = s.access || {};
+      const allow = Array.isArray(ac.allow) ? ac.allow : [];
+      const deny = Array.isArray(ac.deny) ? ac.deny : [];
+      for (const ip of [...allow, ...deny]) if (!IP_RE.test(ip)) return { error: `IP 不合法: ${ip}` };
+      out.access = { allow, deny };
+    }
+    if (s.basicAuth !== undefined) {
+      const b = s.basicAuth || {};
+      if (b.enabled) {
+        if (!USERNAME_RE.test(b.username || '')) return { error: '密码访问用户名不合法' };
+        const had = project.basicAuth?.enabled && project.basicAuth?.username === b.username;
+        if (!b.password && !had) return { error: '启用密码访问必须设置密码' };
+        out.basicAuth = {
+          enabled: true,
+          username: b.username,
+          passwordEnc: b.password ? encrypt(String(b.password), config.masterKey) : project.basicAuth.passwordEnc,
+        };
+      } else {
+        out.basicAuth = { enabled: false, username: b.username || '' };
+      }
+    }
+    if (s.customSnippet !== undefined) {
+      if (String(s.customSnippet).length > 2000) return { error: '自定义片段不超过 2000 字' };
+      if (String(s.customSnippet).includes('}')) return { error: '自定义片段不能包含 } 字符' };
+      out.customSnippet = String(s.customSnippet);
+    }
+    if (s.phpVersion !== undefined) {
+      if (project.type === 'php' && s.phpVersion && !PHP_SOCK[s.phpVersion]) return { error: 'PHP 版本不合法' };
+      if (project.type === 'php' && s.phpVersion) out.phpVersion = s.phpVersion;
+    }
+    return { settings: out };
+  }
+
+  router.get('/servers/:id/projects/:name/settings', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const name = req.params.name;
+    if (!NAME_RE.test(name) || !name.startsWith('linuxmgr-')) return res.status(400).json({ code: 400, message: '只能操作本工具创建的项目' });
+    const project = projectStore.read().find((p) => p.name === name);
+    if (!project) return res.status(404).json({ code: 404, message: '项目不存在' });
+    const cfg = sshCfg(server, res);
+    if (!cfg) return;
+    let phpVersions = [];
+    if (project.type === 'php') {
+      const r = await pool.run(cfg, 'ls /var/run/php*-php-fpm.sock 2>/dev/null');
+      phpVersions = (r.stdout || '').split('\n')
+        .map((l) => l.trim().match(/php(\d+)-php-fpm\.sock/))
+        .filter(Boolean).map((m) => `php${m[1]}`);
+    }
+    res.json({ code: 0, data: { settings: defaultSettings(project), phpVersions, sslDomain: project.sslDomain || '' } });
+  });
+
+  router.put('/servers/:id/projects/:name/settings', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const name = req.params.name;
+    if (!NAME_RE.test(name) || !name.startsWith('linuxmgr-')) return res.status(400).json({ code: 400, message: '只能操作本工具创建的项目' });
+    const list = projectStore.read();
+    const project = list.find((p) => p.name === name);
+    if (!project) return res.status(404).json({ code: 404, message: '项目不存在' });
+    const { error, settings } = validateSettings(req.body?.settings, project);
+    if (error) return res.status(400).json({ code: 400, message: error });
+    const cfg = sshCfg(server, res);
+    if (!cfg) return;
+    try {
+      const next = { ...project, ...settings };
+      const needsVhost = next.type === 'php' || next.proxy?.enabled;
+      if (needsVhost) {
+        await applyBasicAuth({ pool, config }, cfg, next);
+        await applyVhost({ pool }, cfg, next);
+      } else if (project.type !== 'php' && project.proxy?.enabled && !next.proxy?.enabled) {
+        // 关闭反向代理：删除 vhost
+        await pool.run(cfg, `rm -f /etc/nginx/conf.d/${name}.conf`);
+        await pool.run(cfg, 'nginx -s reload');
+        await applyBasicAuth({ pool, config }, cfg, next);
+      }
+      projectStore.write(list.map((p) => (p.name === name ? next : p)));
+      audit(config.dataDir, { action: 'project.settings', target: server.host, detail: name, result: 'success' });
+      res.json({ code: 0, data: { settings: defaultSettings(next) } });
+    } catch (err) {
+      audit(config.dataDir, { action: 'project.settings', target: server.host, detail: name, result: 'fail', detail2: err.message });
+      res.status(502).json({ code: 502, message: `保存设置失败: ${err.message}` });
     }
   });
 

@@ -150,3 +150,68 @@ test('创建 PHP 项目传非法伪静态预设返回 400', async () => {
     .send({ name: 'bad', type: 'php', directory: '/www/bad', port: 8082, phpVersion: 'php74', rewritePreset: 'evil' });
   assert.equal(res.status, 400);
 });
+
+async function createPhp(app) {
+  await request(app).post('/api/servers/srv1/projects').set(await auth(app))
+    .send({ name: 'blog', type: 'php', directory: '/www/blog', port: 8080, phpVersion: 'php82', domain: 'a.com' });
+}
+
+test('读取设置：旧字段合并默认值', async () => {
+  const { app } = setup({ default: OK });
+  await createPhp(app);
+  const res = await request(app).get('/api/servers/srv1/projects/linuxmgr-blog/settings').set(await auth(app));
+  assert.equal(res.status, 200);
+  const s = res.body.data.settings;
+  assert.deepEqual(s.domains, ['a.com']);
+  assert.equal(s.rewrite.preset, 'none');
+  assert.equal(s.index, 'index.php index.html');
+  assert.ok(Array.isArray(res.body.data.phpVersions));
+});
+
+test('保存设置：再生成 vhost 并持久化', async () => {
+  const { app, stores, calls } = setup({ default: OK });
+  await createPhp(app);
+  calls.length = 0;
+  const res = await request(app).put('/api/servers/srv1/projects/linuxmgr-blog/settings').set(await auth(app))
+    .send({ settings: { domains: ['a.com', 'b.com'], rewrite: { preset: 'laravel' }, antiLeech: { enabled: true, allowEmpty: true, referers: ['a.com'] } } });
+  assert.equal(res.status, 200);
+  const joined = calls.join(' ');
+  assert.ok(joined.includes('server_name a.com b.com;'));
+  assert.ok(joined.includes('valid_referers none server_names a.com;'));
+  const saved = JSON.parse(fs.readFileSync(stores.projects.file, 'utf8'))[0];
+  assert.equal(saved.rewrite.preset, 'laravel');
+});
+
+test('保存设置：nginx 校验失败回滚且不保存', async () => {
+  const { app, stores, calls } = setup({
+    'nginx -t && nginx -s reload': () => ({ code: 1, stdout: '', stderr: 'emerg: bad' }),
+    default: OK,
+  });
+  await request(app).post('/api/servers/srv1/projects').set(await auth(app))
+    .send({ name: 'blog', type: 'php', directory: '/www/blog', port: 8080, phpVersion: 'php82' });
+  // 创建时 nginx -t 也会失败 → 创建本身失败；改用手动造记录
+  stores.projects.write([{ name: 'linuxmgr-blog', type: 'php', directory: '/www/blog', port: 8080, phpVersion: 'php82', createdAt: new Date().toISOString() }]);
+  calls.length = 0;
+  const res = await request(app).put('/api/servers/srv1/projects/linuxmgr-blog/settings').set(await auth(app))
+    .send({ settings: { rewrite: { preset: 'wordpress' } } });
+  assert.equal(res.status, 502);
+  assert.ok(res.body.message.includes('已还原'));
+  const saved = JSON.parse(fs.readFileSync(stores.projects.file, 'utf8'))[0];
+  assert.ok(!saved.rewrite || saved.rewrite.preset !== 'wordpress', '失败时不应保存新设置');
+});
+
+test('设置校验：非法域名/IP/重定向/自定义规则', async () => {
+  const { app } = setup({ default: OK });
+  await createPhp(app);
+  const cases = [
+    { domains: ['bad domain!'] },
+    { access: { allow: ['not-an-ip'], deny: [] } },
+    { redirects: [{ from: 'no-slash', to: 'https://a.com', type: 301 }] },
+    { rewrite: { preset: 'custom', custom: 'rewrite x y; } evil' } },
+    { customSnippet: '}' },
+  ];
+  for (const settings of cases) {
+    const res = await request(app).put('/api/servers/srv1/projects/linuxmgr-blog/settings').set(await auth(app)).send({ settings });
+    assert.equal(res.status, 400, JSON.stringify(settings));
+  }
+});
