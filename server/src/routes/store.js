@@ -11,7 +11,7 @@ const SOFTWARE = [
   { name: 'node', display: 'Node.js', desc: 'JavaScript 运行时', versionCmd: 'node -v', pkg: { apt: 'nodejs', yum: 'nodejs' } },
   { name: 'python3', display: 'Python 3', desc: '脚本语言运行时', versionCmd: 'python3 --version', pkg: { apt: 'python3', yum: 'python3' } },
   { name: 'git', display: 'Git', desc: '版本控制', versionCmd: 'git --version', pkg: { apt: 'git', yum: 'git' } },
-  { name: 'fail2ban', display: 'Fail2ban', desc: '暴力破解防护', versionCmd: 'fail2ban-server --version 2>&1 | head -1', pkg: { apt: 'fail2ban', yum: 'fail2ban' } },
+  { name: 'fail2ban', display: 'Fail2ban', desc: '暴力破解防护', versionCmd: 'fail2ban-server --version 2>&1', pkg: { apt: 'fail2ban', yum: 'fail2ban' } },
 ];
 
 function createStoreRouter({ config, pool, store }) {
