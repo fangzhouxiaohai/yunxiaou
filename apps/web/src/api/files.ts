@@ -26,6 +26,10 @@ export function mkdirFile(serverId: string, path: string) {
   return request.post(`/servers/${serverId}/files/mkdir`, { path })
 }
 
+export function touchFile(serverId: string, path: string) {
+  return request.post(`/servers/${serverId}/files/touch`, { path })
+}
+
 export function deleteFile(serverId: string, path: string, confirm: boolean) {
   return request.post(`/servers/${serverId}/files/delete`, { path, confirm })
 }

@@ -272,6 +272,24 @@ test('不能移动到自身子目录', async () => {
   assert.equal(res.status, 400);
 });
 
+test('新建空文件（txt）', async () => {
+  const { app, calls } = setup({
+    'touch /www/app/notes.txt': () => ({ code: 0, stdout: '', stderr: '' }),
+    default: () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+  const res = await request(app).post('/api/servers/srv1/files/touch').set(await auth(app))
+    .send({ path: '/www/app/notes.txt' });
+  assert.equal(res.status, 200);
+  assert.ok(calls.some((c) => c.includes('touch /www/app/notes.txt')));
+});
+
+test('新建文件非法名称拒绝', async () => {
+  const { app } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/files/touch').set(await auth(app))
+    .send({ path: '/www/app/bad name!.txt' });
+  assert.equal(res.status, 400);
+});
+
 test('复制文件到目录', async () => {
   const { app, calls } = setup({
     'mkdir -p /www/app/sub && cp -r /www/app/file.txt /www/app/sub/': () => ({ code: 0, stdout: '', stderr: '' }),

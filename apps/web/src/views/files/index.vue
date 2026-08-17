@@ -14,7 +14,8 @@
           </el-breadcrumb-item>
         </el-breadcrumb>
         <div>
-          <el-button size="small" type="primary" @click="mkdirDialog = true">新建目录</el-button>
+          <el-button size="small" type="primary" @click="newFileDialog = true">新建文件</el-button>
+          <el-button size="small" type="primary" plain @click="mkdirDialog = true">新建文件夹</el-button>
           <el-button size="small" @click="load">刷新</el-button>
         </div>
       </div>
@@ -95,11 +96,19 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="mkdirDialog" title="新建目录" width="400px">
-      <el-input v-model="mkdirName" placeholder="目录名" @keyup.enter="onMkdir" />
+    <el-dialog v-model="mkdirDialog" title="新建文件夹" width="400px">
+      <el-input v-model="mkdirName" placeholder="文件夹名" @keyup.enter="onMkdir" />
       <template #footer>
         <el-button @click="mkdirDialog = false">取消</el-button>
         <el-button type="primary" @click="onMkdir">创建</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="newFileDialog" title="新建文件" width="400px">
+      <el-input v-model="newFileName" placeholder="文件名，如 notes.txt" @keyup.enter="onNewFile" />
+      <template #footer>
+        <el-button @click="newFileDialog = false">取消</el-button>
+        <el-button type="primary" @click="onNewFile">创建</el-button>
       </template>
     </el-dialog>
 
@@ -143,7 +152,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Folder, Document, Link, UploadFilled } from '@element-plus/icons-vue'
 import {
   chmodFile, copyFile, deleteFile, listFiles, mkdirFile, moveFile, readFile, renameFile,
-  uploadFiles, writeFile, type FileItem,
+  touchFile, uploadFiles, writeFile, type FileItem,
 } from '@/api/files'
 import { useServerStore } from '@/stores/server'
 
@@ -166,6 +175,8 @@ const editContent = ref('')
 const editPath = ref('')
 const mkdirDialog = ref(false)
 const mkdirName = ref('')
+const newFileDialog = ref(false)
+const newFileName = ref('')
 const renameDialog = ref(false)
 const renameTo = ref('')
 const renamePath = ref('')
@@ -238,6 +249,19 @@ async function onMkdir() {
   ElMessage.success('已创建')
   mkdirDialog.value = false
   mkdirName.value = ''
+  await load()
+}
+
+async function onNewFile() {
+  const name = newFileName.value.trim()
+  if (!name) {
+    ElMessage.warning('请输入文件名')
+    return
+  }
+  await touchFile(serverStore.currentId!, `${currentPath.value}/${name}`)
+  ElMessage.success(`已创建 ${name}`)
+  newFileDialog.value = false
+  newFileName.value = ''
   await load()
 }
 

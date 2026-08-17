@@ -125,6 +125,27 @@ function createFilesRouter({ config, pool, store }) {
     }
   });
 
+  // 新建文件（空文件，如 txt 文本）
+  router.post('/servers/:id/files/touch', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const filePath = String(req.body?.path || '');
+    if (!validPath(filePath)) return res.status(400).json({ code: 400, message: '路径不合法' });
+    const name = filePath.split('/').pop() || '';
+    if (!NAME_RE.test(name)) return res.status(400).json({ code: 400, message: '文件名不合法（字母/数字/._-，1-100 位）' });
+    if (isProtected(filePath)) return res.status(400).json({ code: 400, message: '禁止在受保护路径创建文件' });
+    const cfg = sshCfg(server, res);
+    if (!cfg) return;
+    try {
+      const r = await pool.run(cfg, `touch ${filePath}`);
+      if (r.code !== 0) throw new Error(r.stderr.slice(0, 200) || `退出码 ${r.code}`);
+      audit(config.dataDir, { action: 'file.touch', target: server.host, detail: filePath, result: 'success' });
+      res.json({ code: 0, data: { created: filePath } });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `创建文件失败: ${err.message}` });
+    }
+  });
+
   router.post('/servers/:id/files/delete', async (req, res) => {
     const server = findServer(req.params.id);
     if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
