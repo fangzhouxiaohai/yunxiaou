@@ -39,7 +39,7 @@ function parseLsblk(output) {
   let current = null;
   for (const line of output.split('\n')) {
     const t = line.trim();
-    if (!t || t === 'NAME SIZE TYPE MOUNTPOINT') continue;
+    if (!t || t.startsWith('NAME')) continue;
     const m = t.match(/^([├└]─)?(\S+)\s+(\S+)\s+(\S+)\s*(\S*)/);
     if (!m) continue;
     const [, tree, name, size, type, mount] = m;
