@@ -27,6 +27,9 @@
         <el-menu-item index="/supervisor">
           <el-icon><Cpu /></el-icon><span>进程守护</span>
         </el-menu-item>
+        <el-menu-item index="/projects">
+          <el-icon><Box /></el-icon><span>项目</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>
@@ -66,7 +69,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Odometer, Monitor, Coin, Shop, Files, Cpu, ArrowDown } from '@element-plus/icons-vue'
+import { Odometer, Monitor, Coin, Shop, Files, Cpu, Box, ArrowDown } from '@element-plus/icons-vue'
 import { useServerStore } from '@/stores/server'
 import { useUserStore } from '@/stores/user'
 

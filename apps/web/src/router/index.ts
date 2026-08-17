@@ -45,6 +45,12 @@ const router = createRouter({
           component: () => import('@/views/supervisor/index.vue'),
           meta: { title: '进程守护' },
         },
+        {
+          path: 'projects',
+          name: 'Projects',
+          component: () => import('@/views/projects/index.vue'),
+          meta: { title: '项目' },
+        },
       ],
     },
   ],
