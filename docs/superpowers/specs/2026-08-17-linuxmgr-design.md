@@ -185,3 +185,48 @@ npm run dev   # Vite dev server（端口 5173），代理 /api 到后端（3000�
 - FTP 管理
 - 面板自身的自动更新
 - PostgreSQL 数据库管理
+
+## 12. P2 扩展批次（用户新增需求，2026-08-17 确认）
+
+交付顺序按依赖：**A（商店扩充）→ B（数据库面板）→ C（项目菜单）→ D（工具菜单）**，每批独立验证。用户已确认：交互式 Web 终端、MySQL 多版本共存+切换。
+
+### 批次 A：软件商店扩充与版本管理
+
+1. **PHP 多版本**（支持并存多版本）：
+   - 版本清单：7.4 / 8.0 / 8.1 / 8.2 / 8.3（CentOS 7 走 remi 源：`yum install php74-php-fpm` 等；Debian/Ubuntu 走 sury 源：`apt install php8.2-fpm`）
+   - 检测：`phpXX -v`（remi 风格命令 php74/php80/php81/php82）与 `php -v`（默认 CLI）
+   - 安装/卸载独立进行；安装后自动启用对应 php-fpm 服务
+2. **Composer**：检测 `composer --version`；安装 = 官方安装脚本（`php -r` + curl 下载——注意：curl|bash 被黑名单拦截，改为下载到 /usr/local/bin/composer 两步执行）；需 PHP 已安装
+3. **Java 环境管理器**：检测 `java -version`；可选安装 OpenJDK 8/11/17（yum/apt 包名映射）；默认版本切换用 `alternatives --set java`（CentOS）或 `update-alternatives`（Debian）
+4. **进程守护管理器（Supervisor）**：检测 `supervisord -v`；安装 supervisor；`supervisorctl status` 进程列表；配置管理：创建/删除 program 配置（`/etc/supervisord.d/*.ini`，统一 `linuxmgr-` 前缀，reload 生效）
+5. **磁盘管理挂载工具**：`lsblk` 块设备/分区列表、`df -h` 挂载点列表、挂载已有文件系统（`mount /dev/x /mnt/linuxmgr-*`，目标目录统一 `linuxmgr-` 前缀）、卸载（`umount`，二次确认）。**不提供格式化**（mkfs 在黑名单中，保持拦截）
+6. **MySQL 多版本共存+切换**：
+   - 可安装版本：MySQL 5.7 / 8.0 / MariaDB 10.x；多版本并存用**端口隔离**（默认 3306，额外版本自动分配 3307/3308）与独立数据目录
+   - 检测：已装实例列表（二进制 + systemd 服务名 + 端口 + 数据目录）
+   - 切换默认：停止非默认实例 + 启动目标实例（前端二次确认 + 审计）；`3306` 端口始终由默认版本占用
+
+### 批次 B：数据库管理面板（模仿 phpMyAdmin 5.2）
+
+- 库列表 → 点击进入库 → 表列表（`SHOW TABLES`）→ 表结构（`DESCRIBE`/`SHOW CREATE TABLE`）→ 数据浏览（`SELECT * LIMIT 100` + 分页）→ 执行 SQL（textarea + 结果表格）
+- 保留现有创建/删除库功能；全部走 mysql CLI（sudo 或 root 凭据）
+- 危险操作（DROP TABLE、DELETE/UPDATE 无 WHERE 等）二次确认；SQL 执行结果统一表格渲染
+
+### 批次 C：项目菜单（替代网站管理）
+
+- 菜单改名"项目"，支持 **PHP / Java / Python / Node** 四类项目
+- 创建项目：项目名（`linuxmgr-` 前缀目录）、源码目录、运行端口、启动命令/入口文件、PHP 版本选择（关联批次 A 多版本）
+- 运行时管理：PHP 项目 → php-fpm + Nginx vhost（沿用 P2 网站模块思路）；Node/Python/Java → 生成 systemd service（`/etc/systemd/system/linuxmgr-<name>.service`，前缀隔离，`systemctl daemon-reload`）+ 启停/重启/状态
+- 项目列表：状态（运行/停止）、端口、类型、启停按钮、日志入口（关联批次 D 日志）
+
+### 批次 D：工具菜单
+
+1. **日志**：选择日志文件（/var/log/nginx/error.log 等常用列表 + 自定义路径）、tail 实时查看（轮询或 SSE）、搜索过滤
+2. **计划任务**：crontab 列表/新增/删除（`crontab -l`/`-e` 文件方式：`/var/spool/cron/root` 追加，统一 `linuxmgr-` 注释标记）、执行记录
+3. **文件管理**：沿用 P1 设计（原 P3 模块提前）；危险路径保护 + 回收站
+4. **SSL 证书**：证书列表（Nginx vhost 关联）、上传证书（crt/key 文本）、自签生成（openssl）、Let's Encrypt 留待后续
+5. **Web 终端**：交互式——后端 `ws` + `ssh2 shell` 双向流；前端 xterm.js 终端组件；认证复用 JWT（WebSocket 握手带 token）；命令执行安全提示（终端是用户主动操作，黑名单不拦截但记录审计）
+
+### 批次 A-D 通用约束
+
+- 所有写操作沿用 8.1 约束：`linuxmgr-` 前缀隔离、二次确认、审计日志
+- 新增/修改的文件配置一律不触碰已有配置
