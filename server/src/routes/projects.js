@@ -2,7 +2,7 @@ const express = require('express');
 const { encrypt, decrypt } = require('../crypto/cipher');
 const { audit } = require('../utils/audit');
 const { assertCommandSafe } = require('../ssh/exec');
-const { applyVhost, applyBasicAuth, REWRITE_PRESETS, PHP_SOCK } = require('../utils/vhost');
+const { buildVhost, applyVhost, applyBasicAuth, REWRITE_PRESETS, PHP_SOCK } = require('../utils/vhost');
 
 const NAME_RE = /^[a-zA-Z0-9_-]{1,32}$/;
 const DIR_RE = /^\/[a-zA-Z0-9_/.-]{1,200}$/;
@@ -355,6 +355,39 @@ WantedBy=multi-user.target`;
     } catch (err) {
       audit(config.dataDir, { action: 'project.settings', target: server.host, detail: name, result: 'fail', detail2: err.message });
       res.status(502).json({ code: 502, message: `保存设置失败: ${err.message}` });
+    }
+  });
+
+  router.get('/servers/:id/projects/:name/vhost', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const name = req.params.name;
+    if (!NAME_RE.test(name) || !name.startsWith('linuxmgr-')) return res.status(400).json({ code: 400, message: '只能操作本工具创建的项目' });
+    const project = projectStore.read().find((p) => p.name === name);
+    if (!project) return res.status(404).json({ code: 404, message: '项目不存在' });
+    if (project.type !== 'php' && !project.proxy?.enabled) {
+      return res.json({ code: 0, data: '# 该项目未启用反向代理，无 Nginx 配置' });
+    }
+    res.json({ code: 0, data: buildVhost(project) });
+  });
+
+  router.get('/servers/:id/projects/:name/sitelogs', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const name = req.params.name;
+    if (!NAME_RE.test(name) || !name.startsWith('linuxmgr-')) return res.status(400).json({ code: 400, message: '只能操作本工具创建的项目' });
+    const project = projectStore.read().find((p) => p.name === name);
+    if (!project) return res.status(404).json({ code: 404, message: '项目不存在' });
+    const type = req.query.type === 'error' ? 'error' : req.query.type === 'access' ? 'access' : null;
+    if (!type) return res.status(400).json({ code: 400, message: 'type 必须为 access 或 error' });
+    const lines = Math.min(Math.max(Number(req.query.lines) || 200, 1), 1000);
+    const cfg = sshCfg(server, res);
+    if (!cfg) return;
+    try {
+      const r = await pool.run(cfg, `tail -n ${lines} /var/log/nginx/${name}.${type}.log 2>/dev/null || true`);
+      res.json({ code: 0, data: r.stdout || '' });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `读取网站日志失败: ${err.message}` });
     }
   });
 

@@ -1,6 +1,7 @@
 const express = require('express');
 const { decrypt } = require('../crypto/cipher');
 const { audit } = require('../utils/audit');
+const { applyVhost } = require('../utils/vhost');
 
 const DOMAIN_RE = /^[a-zA-Z0-9.-]{1,100}$/;
 const SSL_DIR = '/etc/nginx/ssl';
@@ -49,23 +50,23 @@ function createSslRouter({ config, pool, store, projectStore }) {
     return info;
   }
 
-  // 将证书配置追加到项目 vhost（幂等：已有关联标记则跳过）
+  // 将证书关联到项目：写 sslDomain 字段并重新生成 vhost
   async function linkVhost(cfg, server, domain) {
     if (!projectStore) return { linked: false, reason: '项目存储不可用' };
-    const project = projectStore.read().find((p) => p.domain === domain);
+    const list = projectStore.read();
+    const project = list.find((p) => (Array.isArray(p.domains) && p.domains.length ? p.domains : [p.domain].filter(Boolean)).includes(domain));
     if (!project) return { linked: false, reason: '未找到该域名的项目' };
-    const vhost = `/etc/nginx/conf.d/${project.name}.conf`;
-    const cat = await pool.run(cfg, `cat ${vhost}`);
-    if (cat.code !== 0) return { linked: false, reason: '项目 vhost 不存在（项目可能已删除）' };
-    const marker = `linuxmgr-ssl-${domain}`;
-    if (cat.stdout.includes(marker)) return { linked: true, reason: '已关联' };
-    const base = cat.stdout.replace(/\}\s*$/, '').trimEnd();
-    const block = `${base}\n\n    # ${marker}\n    listen 443 ssl;\n    ssl_certificate ${SSL_DIR}/linuxmgr-${domain}.crt;\n    ssl_certificate_key ${SSL_DIR}/linuxmgr-${domain}.key;\n}`;
-    const writeCmd = `cat > ${vhost} <<'LINUXMGR_EOF'\n${block}\nLINUXMGR_EOF`;
-    const w = await pool.run(cfg, writeCmd);
-    if (w.code !== 0) return { linked: false, reason: w.stderr.slice(0, 200) };
-    const t = await pool.run(cfg, 'nginx -t && nginx -s reload');
-    if (t.code !== 0) return { linked: false, reason: `nginx 校验失败: ${t.stderr.slice(0, 200)}` };
+    if (project.type !== 'php' && !project.proxy?.enabled) {
+      return { linked: false, reason: '该项目无 Nginx 配置（未启用反向代理）' };
+    }
+    if (project.sslDomain === domain) return { linked: true, reason: '已关联' };
+    const next = { ...project, sslDomain: domain };
+    try {
+      await applyVhost({ pool }, cfg, next);
+    } catch (err) {
+      return { linked: false, reason: err.message };
+    }
+    projectStore.write(list.map((p) => (p.name === project.name ? next : p)));
     return { linked: true, reason: '已关联并 reload' };
   }
 

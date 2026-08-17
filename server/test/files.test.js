@@ -185,20 +185,21 @@ test('自签证书自动设置续期（脚本 + crontab）并关联项目 vhost'
   assert.ok(joined.includes('nginx -t && nginx -s reload'), '应 reload nginx');
 });
 
-test('自签证书重复生成时 vhost 不重复追加（幂等）', async () => {
+test('自签证书重复生成时 vhost 不重复生成（幂等，按 sslDomain 判断）', async () => {
   const seed = [
-    { name: 'linuxmgr-blog', type: 'php', directory: '/www/blog', port: 8080, domain: 'blog.example.com', createdAt: '2026-01-01' },
+    { name: 'linuxmgr-blog', type: 'php', directory: '/www/blog', port: 8080, domain: 'blog.example.com', domains: ['blog.example.com'], sslDomain: 'blog.example.com', createdAt: '2026-01-01' },
   ];
   const { app, calls } = setup({
-    'cat /etc/nginx/conf.d/linuxmgr-blog.conf': () => ({ code: 0, stdout: 'server {\n    listen 8080;\n    # linuxmgr-ssl-blog.example.com\n    listen 443 ssl;\n}\n', stderr: '' }),
     default: () => ({ code: 0, stdout: '', stderr: '' }),
   }, seed);
   const res = await request(app).post('/api/servers/srv1/ssl/selfsigned').set(await auth(app))
     .send({ domain: 'blog.example.com' });
   assert.equal(res.status, 200);
+  assert.equal(res.body.data.vhost.linked, true);
+  assert.equal(res.body.data.vhost.reason, '已关联');
   const joined = calls.join(' ');
   const writeCount = joined.split('cat > /etc/nginx/conf.d/linuxmgr-blog.conf').length - 1;
-  assert.equal(writeCount, 0, '已有关联标记时不应重写 vhost');
+  assert.equal(writeCount, 0, 'sslDomain 已关联时不应重写 vhost');
 });
 
 // ===== 多文件上传 / 移动 / 复制 =====

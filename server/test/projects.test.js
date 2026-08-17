@@ -226,3 +226,24 @@ test('保存设置：runDir 传空字符串可清空运行目录', async () => {
   const saved = JSON.parse(fs.readFileSync(stores.projects.file, 'utf8'))[0];
   assert.equal(saved.runDir, '');
 });
+
+test('查看生成的 vhost 配置', async () => {
+  const { app } = setup({ default: OK });
+  await createPhp(app);
+  const res = await request(app).get('/api/servers/srv1/projects/linuxmgr-blog/vhost').set(await auth(app));
+  assert.equal(res.status, 200);
+  assert.ok(res.body.data.includes('server {'));
+  assert.ok(res.body.data.includes('fastcgi_pass unix:/var/run/php82-php-fpm.sock;'));
+});
+
+test('网站日志读取', async () => {
+  const { app } = setup({
+    default: OK,
+  });
+  await createPhp(app);
+  const res = await request(app).get('/api/servers/srv1/projects/linuxmgr-blog/sitelogs?type=access&lines=100').set(await auth(app));
+  assert.equal(res.status, 200);
+  assert.equal(typeof res.body.data, 'string');
+  const bad = await request(app).get('/api/servers/srv1/projects/linuxmgr-blog/sitelogs?type=evil').set(await auth(app));
+  assert.equal(bad.status, 400);
+});
