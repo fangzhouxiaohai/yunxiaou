@@ -32,12 +32,18 @@ function createCrontabRouter({ config, pool, store }) {
     if (!cfg) return;
     try {
       const r = await pool.run(cfg, 'crontab -l 2>/dev/null');
+      const lines = (r.stdout || '').split('\n').map((l) => l.trim()).filter(Boolean);
       const entries = [];
-      for (const line of (r.stdout || '').split('\n')) {
-        const t = line.trim();
-        if (!t) continue;
-        const mark = t.match(MARK_RE);
-        entries.push(mark ? { line: t, ours: true, id: `linuxmgr-${mark[1]}` } : { line: t, ours: false });
+      for (let i = 0; i < lines.length; i++) {
+        const mark = lines[i].match(MARK_RE);
+        if (mark) {
+          // 标记注释行与其后紧跟的命令行合并为一条记录
+          const cmd = lines[i + 1] || '';
+          entries.push({ line: cmd, ours: true, id: `linuxmgr-${mark[1]}` });
+          i += 1;
+        } else {
+          entries.push({ line: lines[i], ours: false });
+        }
       }
       res.json({ code: 0, data: entries });
     } catch (err) {

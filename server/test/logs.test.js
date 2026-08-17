@@ -64,17 +64,18 @@ test('非法日志路径拒绝', async () => {
   assert.equal(res.status, 400);
 });
 
-test('计划任务列表（含 ours 标记识别）', async () => {
+test('计划任务列表（标记行与命令行合并，ours 识别）', async () => {
   const { app } = setup({
     'crontab -l 2>/dev/null': () => ({ code: 0, stdout: '0 2 * * * /usr/bin/backup.sh\n# linuxmgr-abc123\n*/5 * * * * /usr/bin/check.sh\n', stderr: '' }),
     default: () => ({ code: 0, stdout: '', stderr: '' }),
   });
   const res = await request(app).get('/api/servers/srv1/crontabs').set(await auth(app));
   assert.equal(res.status, 200);
-  assert.equal(res.body.data.length, 3);
+  assert.equal(res.body.data.length, 2, '标记行与命令行应合并为一条');
   assert.equal(res.body.data[0].ours, false);
   assert.equal(res.body.data[1].ours, true);
   assert.equal(res.body.data[1].id, 'linuxmgr-abc123');
+  assert.ok(res.body.data[1].line.includes('check.sh'), 'ours 条目的 line 应为命令行');
 });
 
 test('crontab 不存在时返回空列表', async () => {
