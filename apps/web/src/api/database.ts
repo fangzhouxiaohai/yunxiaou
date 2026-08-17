@@ -49,3 +49,28 @@ export function listRedisKeys(serverId: string) {
 export function flushRedis(serverId: string, confirm: boolean) {
   return request.post(`/servers/${serverId}/redis/flush`, { confirm })
 }
+
+// ===== 数据库面板（phpMyAdmin 风格）=====
+
+export interface BatchResult {
+  columns: string[]
+  rows: string[][]
+}
+
+export function listTables(serverId: string, db: string) {
+  return request.get(`/servers/${serverId}/databases/${db}/tables`) as Promise<string[]>
+}
+
+export function tableStructure(serverId: string, db: string, table: string) {
+  return request.get(`/servers/${serverId}/databases/${db}/tables/${table}/structure`) as Promise<BatchResult>
+}
+
+export function tableRows(serverId: string, db: string, table: string, page: number, limit: number) {
+  return request.get(`/servers/${serverId}/databases/${db}/tables/${table}/rows`, { params: { page, limit } }) as Promise<
+    BatchResult & { total: number; page: number; limit: number }
+  >
+}
+
+export function execSql(serverId: string, db: string, sql: string, confirm?: boolean) {
+  return request.post(`/servers/${serverId}/sql`, { db, sql, confirm }) as Promise<BatchResult>
+}
