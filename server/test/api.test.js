@@ -106,3 +106,34 @@ test('不存在的服务器返回 404', async () => {
   const res = await request(app).delete('/api/servers/no-such-id').set(auth);
   assert.equal(res.status, 404);
 });
+
+test('修改密码：成功后旧密码失效、新密码可登录', async () => {
+  const { app } = setup();
+  const auth = { Authorization: `Bearer ${await login(app)}` };
+  const res = await request(app).put('/api/auth/password').set(auth)
+    .send({ oldPassword: 'pw', newPassword: 'newpass1' });
+  assert.equal(res.status, 200);
+  const oldLogin = await request(app).post('/api/auth/login').send({ username: 'admin', password: 'pw' });
+  assert.equal(oldLogin.status, 401);
+  const newLogin = await request(app).post('/api/auth/login').send({ username: 'admin', password: 'newpass1' });
+  assert.equal(newLogin.status, 200);
+});
+
+test('修改密码：原密码错误返回 400', async () => {
+  const { app } = setup();
+  const auth = { Authorization: `Bearer ${await login(app)}` };
+  const res = await request(app).put('/api/auth/password').set(auth)
+    .send({ oldPassword: 'wrong', newPassword: 'newpass1' });
+  assert.equal(res.status, 400);
+});
+
+test('修改密码：新密码少于 6 位返回 400，未登录返回 401', async () => {
+  const { app } = setup();
+  const auth = { Authorization: `Bearer ${await login(app)}` };
+  const short = await request(app).put('/api/auth/password').set(auth)
+    .send({ oldPassword: 'pw', newPassword: '123' });
+  assert.equal(short.status, 400);
+  const noAuth = await request(app).put('/api/auth/password')
+    .send({ oldPassword: 'pw', newPassword: 'newpass1' });
+  assert.equal(noAuth.status, 401);
+});
