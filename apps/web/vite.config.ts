@@ -9,7 +9,9 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    proxy: { '/api': 'http://localhost:3000' },
+    proxy: {
+      '/api': { target: 'http://localhost:3000', ws: true },
+    },
     watch: {
       // Windows 上忽略编辑器临时文件，避免 EBUSY 监视崩溃
       ignored: ['**/.*.tmpdir/**', '**/*.tmp'],

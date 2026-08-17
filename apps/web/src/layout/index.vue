@@ -30,6 +30,9 @@
         <el-menu-item index="/projects">
           <el-icon><Box /></el-icon><span>项目</span>
         </el-menu-item>
+        <el-menu-item index="/terminal">
+          <el-icon><Monitor /></el-icon><span>终端</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>

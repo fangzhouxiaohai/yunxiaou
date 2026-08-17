@@ -51,6 +51,12 @@ const router = createRouter({
           component: () => import('@/views/projects/index.vue'),
           meta: { title: '项目' },
         },
+        {
+          path: 'terminal',
+          name: 'Terminal',
+          component: () => import('@/views/terminal/index.vue'),
+          meta: { title: '终端' },
+        },
       ],
     },
   ],

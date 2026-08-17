@@ -18,6 +18,7 @@ const createLogsRouter = require('./routes/logs');
 const createCrontabRouter = require('./routes/crontab');
 const createFilesRouter = require('./routes/files');
 const createSslRouter = require('./routes/ssl');
+const { setupTerminal } = require('./routes/terminal');
 
 function createApp({ config, pool, stores }) {
   const app = express();
@@ -61,7 +62,8 @@ function start() {
     projects: new JsonStore(config.dataDir, 'projects.json', []),
   };
   const app = createApp({ config, pool, stores });
-  app.listen(config.port, () => console.log(`linuxmgr server listening on http://localhost:${config.port}`));
+  const server = app.listen(config.port, () => console.log(`linuxmgr server listening on http://localhost:${config.port}`));
+  setupTerminal({ config, store: stores.servers, httpServer: server });
   return app;
 }
 
