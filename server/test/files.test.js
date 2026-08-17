@@ -25,6 +25,10 @@ function setup(scripted, projectSeed = []) {
       const h = scripted[command] || scripted.default;
       return h ? h() : { code: 0, stdout: '', stderr: '' };
     },
+    async sftpPut(cfg, local, remote) {
+      calls.push(`sftpPut:${remote}`);
+      return { code: 0 };
+    },
     closeKey: () => {},
   };
   const app = createApp({ config, pool, stores });
@@ -195,4 +199,86 @@ test('自签证书重复生成时 vhost 不重复追加（幂等）', async () =
   const joined = calls.join(' ');
   const writeCount = joined.split('cat > /etc/nginx/conf.d/linuxmgr-blog.conf').length - 1;
   assert.equal(writeCount, 0, '已有关联标记时不应重写 vhost');
+});
+
+// ===== 多文件上传 / 移动 / 复制 =====
+
+test('多文件上传（含子目录结构，走 SFTP）', async () => {
+  const { app, calls } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app)
+    .post('/api/servers/srv1/files/upload')
+    .set(await auth(app))
+    .field('path', '/www/app')
+    .field('paths', 'logo.png')
+    .field('paths', 'img/banner.png')
+    .attach('files', Buffer.from('PNGDATA1'), { filename: 'logo.png' })
+    .attach('files', Buffer.from('PNGDATA2'), { filename: 'banner.png' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.uploaded, 2);
+  const joined = calls.join(' ');
+  assert.ok(joined.includes('mkdir -p /www/app'), '应确保目标目录存在');
+  assert.ok(joined.includes('sftpPut:/www/app/logo.png'), '应 SFTP 上传第一个文件');
+  assert.ok(joined.includes('mkdir -p /www/app/img'), '应创建子目录');
+  assert.ok(joined.includes('sftpPut:/www/app/img/banner.png'), '应上传到子目录');
+});
+
+test('上传无文件返回 400', async () => {
+  const { app } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app)
+    .post('/api/servers/srv1/files/upload?path=/www')
+    .set(await auth(app))
+    .field('paths', 'x.png');
+  assert.equal(res.status, 400);
+});
+
+test('非法相对路径拒绝（.. 与绝对路径）', async () => {
+  const { app } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const bad = await request(app)
+    .post('/api/servers/srv1/files/upload?path=/www')
+    .set(await auth(app))
+    .field('paths', '../evil.sh')
+    .attach('files', Buffer.from('x'), { filename: 'evil.sh' });
+  assert.equal(bad.status, 400);
+  const bad2 = await request(app)
+    .post('/api/servers/srv1/files/upload?path=/www')
+    .set(await auth(app))
+    .field('paths', '/etc/passwd')
+    .attach('files', Buffer.from('x'), { filename: 'passwd' });
+  assert.equal(bad2.status, 400);
+});
+
+test('移动文件到目录（拖拽移动）', async () => {
+  const { app, calls } = setup({
+    'mkdir -p /www/app/sub && mv /www/app/file.txt /www/app/sub/': () => ({ code: 0, stdout: '', stderr: '' }),
+    default: () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+  const res = await request(app).post('/api/servers/srv1/files/move').set(await auth(app))
+    .send({ path: '/www/app/file.txt', targetDir: '/www/app/sub', confirm: true });
+  assert.equal(res.status, 200);
+  assert.ok(calls.some((c) => c.includes('mv /www/app/file.txt /www/app/sub/')));
+});
+
+test('移动未确认时拒绝', async () => {
+  const { app } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/files/move').set(await auth(app))
+    .send({ path: '/www/app/file.txt', targetDir: '/www/app/sub', confirm: false });
+  assert.equal(res.status, 400);
+});
+
+test('不能移动到自身子目录', async () => {
+  const { app } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/files/move').set(await auth(app))
+    .send({ path: '/www/app', targetDir: '/www/app/sub', confirm: true });
+  assert.equal(res.status, 400);
+});
+
+test('复制文件到目录', async () => {
+  const { app, calls } = setup({
+    'mkdir -p /www/app/sub && cp -r /www/app/file.txt /www/app/sub/': () => ({ code: 0, stdout: '', stderr: '' }),
+    default: () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+  const res = await request(app).post('/api/servers/srv1/files/copy').set(await auth(app))
+    .send({ path: '/www/app/file.txt', targetDir: '/www/app/sub' });
+  assert.equal(res.status, 200);
+  assert.ok(calls.some((c) => c.includes('cp -r /www/app/file.txt')));
 });

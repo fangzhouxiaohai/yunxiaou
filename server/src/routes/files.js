@@ -1,10 +1,15 @@
 const express = require('express');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const multer = require('multer');
 const { decrypt } = require('../crypto/cipher');
 const { audit } = require('../utils/audit');
 
 const PATH_RE = /^\/$|^\/[a-zA-Z0-9_/.-]{1,200}$/;
 const NAME_RE = /^[a-zA-Z0-9._-]{1,100}$/;
 const MODE_RE = /^[0-7]{3,4}$/;
+const RELPATH_RE = /^[a-zA-Z0-9_\u4e00-\u9fa5 .()\-/]{1,300}$/;
 // 危险路径：读写均禁止
 const PROTECTED = ['/etc/shadow', '/etc/passwd', '/etc/sudoers', '/etc/gshadow', '/etc/ssh', '/root/.ssh', '/proc', '/sys', '/dev', '/boot'];
 
@@ -177,6 +182,108 @@ function createFilesRouter({ config, pool, store }) {
       res.json({ code: 0, data: { chmod: `${filePath} ${mode}` } });
     } catch (err) {
       res.status(502).json({ code: 502, message: `修改权限失败: ${err.message}` });
+    }
+  });
+
+  // ===== 多文件/文件夹上传（multipart + SFTP）=====
+
+  // 目标目录必须已存在；相对路径逐段校验（防 .. 与绝对路径）
+  function validRelPath(rel) {
+    if (!RELPATH_RE.test(rel)) return false;
+    if (rel.startsWith('/') || rel.includes('\\')) return false;
+    if (rel.split('/').some((seg) => seg === '..' || seg === '')) return false;
+    return true;
+  }
+
+  const uploader = multer({
+    dest: path.join(os.tmpdir(), 'linuxmgr-uploads'),
+    limits: { fileSize: 20 * 1024 * 1024, files: 200 },
+  });
+
+  router.post('/servers/:id/files/upload', uploader.array('files', 200), async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const targetDir = String(req.body?.path || '/');
+    if (!validPath(targetDir)) return res.status(400).json({ code: 400, message: '目标目录不合法' });
+    const files = req.files || [];
+    const relPaths = Array.isArray(req.body?.paths) ? req.body.paths : (req.body?.paths ? [req.body.paths] : []);
+    if (files.length === 0) return res.status(400).json({ code: 400, message: '未接收到文件' });
+    if (files.length !== relPaths.length) return res.status(400).json({ code: 400, message: '文件与路径数量不一致' });
+    for (const rel of relPaths) {
+      if (!validRelPath(String(rel))) return res.status(400).json({ code: 400, message: `相对路径不合法: ${rel}` });
+    }
+    const cfg = sshCfg(server, res);
+    if (!cfg) return;
+    try {
+      // 目标目录不存在则创建
+      const mk = await pool.run(cfg, `mkdir -p ${targetDir}`);
+      if (mk.code !== 0) throw new Error(mk.stderr.slice(0, 200));
+      const uploaded = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const rel = String(relPaths[i]);
+        const remoteDir = rel.includes('/') ? `${targetDir}/${rel.slice(0, rel.lastIndexOf('/'))}` : targetDir;
+        const remotePath = `${targetDir}/${rel}`;
+        const mkdir = await pool.run(cfg, `mkdir -p ${remoteDir}`);
+        if (mkdir.code !== 0) throw new Error(`创建远端目录失败: ${mkdir.stderr.slice(0, 200)}`);
+        if (typeof pool.sftpPut === 'function') {
+          await pool.sftpPut(cfg, file.path, remotePath);
+        } else {
+          throw new Error('连接池不支持 sftpPut');
+        }
+        uploaded.push(remotePath);
+      }
+      audit(config.dataDir, { action: 'file.upload', target: server.host, detail: `${targetDir} (${files.length} 个文件)`, result: 'success' });
+      res.json({ code: 0, data: { uploaded: uploaded.length, targetDir } });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `上传失败: ${err.message}` });
+    } finally {
+      // 清理本地临时文件
+      try { fs.rmSync(path.join(os.tmpdir(), 'linuxmgr-uploads'), { recursive: true, force: true }); } catch { /* noop */ }
+    }
+  });
+
+  // 移动文件/文件夹到目标目录（前端拖拽到目录）
+  router.post('/servers/:id/files/move', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (req.body?.confirm !== true) return res.status(400).json({ code: 400, message: '危险操作需确认（confirm: true）' });
+    const filePath = String(req.body?.path || '');
+    const targetDir = String(req.body?.targetDir || '');
+    if (!validPath(filePath) || !validPath(targetDir)) return res.status(400).json({ code: 400, message: '路径不合法' });
+    if (isProtected(filePath) || isProtected(targetDir)) return res.status(400).json({ code: 400, message: '禁止操作受保护路径' });
+    if (targetDir === filePath || targetDir.startsWith(`${filePath}/`)) {
+      return res.status(400).json({ code: 400, message: '不能移动到自身或其子目录' });
+    }
+    const cfg = sshCfg(server, res);
+    if (!cfg) return;
+    try {
+      const r = await pool.run(cfg, `mkdir -p ${targetDir} && mv ${filePath} ${targetDir}/`);
+      if (r.code !== 0) throw new Error(r.stderr.slice(0, 200) || `退出码 ${r.code}`);
+      audit(config.dataDir, { action: 'file.move', target: server.host, detail: `${filePath} -> ${targetDir}`, result: 'success' });
+      res.json({ code: 0, data: { moved: `${filePath} -> ${targetDir}` } });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `移动失败: ${err.message}` });
+    }
+  });
+
+  // 复制文件/文件夹到目标目录
+  router.post('/servers/:id/files/copy', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const filePath = String(req.body?.path || '');
+    const targetDir = String(req.body?.targetDir || '');
+    if (!validPath(filePath) || !validPath(targetDir)) return res.status(400).json({ code: 400, message: '路径不合法' });
+    if (isProtected(filePath) || isProtected(targetDir)) return res.status(400).json({ code: 400, message: '禁止操作受保护路径' });
+    const cfg = sshCfg(server, res);
+    if (!cfg) return;
+    try {
+      const r = await pool.run(cfg, `mkdir -p ${targetDir} && cp -r ${filePath} ${targetDir}/`);
+      if (r.code !== 0) throw new Error(r.stderr.slice(0, 200) || `退出码 ${r.code}`);
+      audit(config.dataDir, { action: 'file.copy', target: server.host, detail: `${filePath} -> ${targetDir}`, result: 'success' });
+      res.json({ code: 0, data: { copied: `${filePath} -> ${targetDir}` } });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `复制失败: ${err.message}` });
     }
   });
 

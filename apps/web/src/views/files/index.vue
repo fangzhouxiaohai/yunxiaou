@@ -26,23 +26,55 @@
         :closable="false"
         class="alert-gap"
       />
+      <!-- 上传区：拖拽 / 多选 / 文件夹 -->
+      <div class="dropzone" @dragover.prevent @drop.prevent="onDrop">
+        <el-icon class="dz-icon"><UploadFilled /></el-icon>
+        <span class="dz-text">拖拽文件或文件夹到此处上传（保持目录结构），或</span>
+        <el-button size="small" type="primary" @click="fileInput?.click()">选择文件</el-button>
+        <el-button size="small" @click="dirInput?.click()">选择文件夹</el-button>
+        <input ref="fileInput" type="file" multiple class="hidden-input" @change="onPickFiles" />
+        <input ref="dirInput" type="file" webkitdirectory multiple class="hidden-input" @change="onPickFiles" />
+      </div>
+      <el-progress
+        v-if="uploading"
+        :percentage="uploadPercent"
+        :stroke-width="10"
+        class="upload-progress"
+        :status="uploadPercent === 100 ? 'success' : undefined"
+      />
+      <div v-if="uploading" class="upload-hint">正在上传 {{ uploadFilesCount }} 个文件到 {{ currentPath }}…</div>
       <el-table :data="items" v-loading="loading" size="small">
         <el-table-column label="名称" min-width="220">
           <template #default="{ row }">
-            <el-link v-if="row.type === 'dir'" type="primary" @click="enterDir(row.name)">
+            <el-link
+              v-if="row.type === 'dir'"
+              type="primary"
+              draggable="true"
+              class="drop-target"
+              @dragstart="onDragStart(row)"
+              @dragover.prevent
+              @drop.prevent="onDropInto(row)"
+              @click="enterDir(row.name)"
+            >
               <el-icon><Folder /></el-icon>&nbsp;{{ row.name }}
             </el-link>
-            <span v-else-if="row.type === 'link'"><el-icon><Link /></el-icon>&nbsp;{{ row.name }}</span>
-            <span v-else><el-icon><Document /></el-icon>&nbsp;{{ row.name }}</span>
+            <span v-else-if="row.type === 'link'" draggable="true" class="drag-item" @dragstart="onDragStart(row)">
+              <el-icon><Link /></el-icon>&nbsp;{{ row.name }}
+            </span>
+            <span v-else draggable="true" class="drag-item" @dragstart="onDragStart(row)">
+              <el-icon><Document /></el-icon>&nbsp;{{ row.name }}
+            </span>
           </template>
         </el-table-column>
         <el-table-column prop="type" label="类型" width="80" />
         <el-table-column prop="size" label="大小" width="90" />
         <el-table-column prop="mtime" label="修改时间" width="160" />
-        <el-table-column label="操作" width="260">
+        <el-table-column label="操作" width="320">
           <template #default="{ row }">
             <el-button v-if="row.type === 'file'" link type="primary" @click="onView(row)">查看</el-button>
             <el-button v-if="row.type === 'file'" link type="primary" @click="onEdit(row)">编辑</el-button>
+            <el-button link type="primary" @click="onCopy(row)">复制</el-button>
+            <el-button link type="warning" @click="onMoveDialog(row)">移动</el-button>
             <el-button link type="warning" @click="onRename(row)">重命名</el-button>
             <el-button link type="warning" @click="onChmod(row)">权限</el-button>
             <el-button link type="danger" @click="onDelete(row)">删除</el-button>
@@ -86,15 +118,32 @@
         <el-button type="primary" @click="onChmodConfirm">确定</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="copyDialog" title="复制到目录" width="440px">
+      <el-input v-model="copyTarget" placeholder="目标目录，如 /www/app/sub" @keyup.enter="onCopyConfirm" />
+      <template #footer>
+        <el-button @click="copyDialog = false">取消</el-button>
+        <el-button type="primary" @click="onCopyConfirm">复制</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="moveDialog" title="移动到目录" width="440px">
+      <el-input v-model="moveTarget" placeholder="目标目录，如 /www/app/sub" @keyup.enter="onMoveConfirm" />
+      <template #footer>
+        <el-button @click="moveDialog = false">取消</el-button>
+        <el-button type="primary" @click="onMoveConfirm">移动</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Folder, Document, Link } from '@element-plus/icons-vue'
+import { Folder, Document, Link, UploadFilled } from '@element-plus/icons-vue'
 import {
-  chmodFile, deleteFile, listFiles, mkdirFile, readFile, renameFile, writeFile, type FileItem,
+  chmodFile, copyFile, deleteFile, listFiles, mkdirFile, moveFile, readFile, renameFile,
+  uploadFiles, writeFile, type FileItem,
 } from '@/api/files'
 import { useServerStore } from '@/stores/server'
 
@@ -104,6 +153,11 @@ const pathInput = ref('')
 const items = ref<FileItem[]>([])
 const loading = ref(false)
 const listError = ref('')
+const fileInput = ref<HTMLInputElement>()
+const dirInput = ref<HTMLInputElement>()
+const uploading = ref(false)
+const uploadPercent = ref(0)
+const uploadFilesCount = ref(0)
 const saving = ref(false)
 const viewDialog = ref(false)
 const fileContent = ref('')
@@ -221,6 +275,107 @@ async function onDelete(row: FileItem) {
   await load()
 }
 
+// ===== 上传（多文件 / 文件夹 / 拖拽）=====
+
+async function doUpload(files: File[]) {
+  if (files.length === 0 || !serverStore.currentId) return
+  uploadFilesCount.value = files.length
+  uploading.value = true
+  uploadPercent.value = 0
+  try {
+    const result = await uploadFiles(serverStore.currentId, currentPath.value, files, (p) => {
+      uploadPercent.value = p
+    })
+    ElMessage.success(`已上传 ${result.uploaded} 个文件到 ${result.targetDir}`)
+    await load()
+  } finally {
+    uploading.value = false
+  }
+}
+
+function onDrop(e: DragEvent) {
+  const files = e.dataTransfer?.files
+  if (files && files.length > 0) {
+    doUpload(Array.from(files))
+  }
+}
+
+function onPickFiles(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = input.files
+  if (files && files.length > 0) {
+    doUpload(Array.from(files))
+  }
+  input.value = ''
+}
+
+// ===== 拖拽移动（文件/文件夹拖入目录行）=====
+
+let dragSource = ''
+
+function onDragStart(row: FileItem) {
+  dragSource = `${currentPath.value}/${row.name}`
+}
+
+async function onDropInto(row: FileItem) {
+  if (!dragSource) return
+  const targetDir = `${currentPath.value}/${row.name}`
+  if (dragSource === targetDir || targetDir.startsWith(`${dragSource}/`)) {
+    ElMessage.warning('不能移动到自身或其子目录')
+    dragSource = ''
+    return
+  }
+  const name = dragSource.split('/').pop()
+  await ElMessageBox.confirm(`将「${name}」移动到「${targetDir}」？`, '移动确认', { type: 'warning' })
+  await moveFile(serverStore.currentId!, dragSource, targetDir, true)
+  ElMessage.success('已移动')
+  dragSource = ''
+  await load()
+}
+
+// ===== 复制 / 移动（按钮 + 目录输入）=====
+
+const copyDialog = ref(false)
+const copyTarget = ref('')
+const copyPath = ref('')
+const moveDialog = ref(false)
+const moveTarget = ref('')
+const movePath = ref('')
+
+function onCopy(row: FileItem) {
+  copyPath.value = `${currentPath.value}/${row.name}`
+  copyTarget.value = ''
+  copyDialog.value = true
+}
+
+async function onCopyConfirm() {
+  if (!copyTarget.value.trim()) {
+    ElMessage.warning('请输入目标目录')
+    return
+  }
+  await copyFile(serverStore.currentId!, copyPath.value, copyTarget.value.trim())
+  ElMessage.success('复制完成')
+  copyDialog.value = false
+  await load()
+}
+
+function onMoveDialog(row: FileItem) {
+  movePath.value = `${currentPath.value}/${row.name}`
+  moveTarget.value = ''
+  moveDialog.value = true
+}
+
+async function onMoveConfirm() {
+  if (!moveTarget.value.trim()) {
+    ElMessage.warning('请输入目标目录')
+    return
+  }
+  await moveFile(serverStore.currentId!, movePath.value, moveTarget.value.trim(), true)
+  ElMessage.success('已移动')
+  moveDialog.value = false
+  await load()
+}
+
 onMounted(load)
 </script>
 
@@ -228,5 +383,18 @@ onMounted(load)
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; }
 .path-input { width: 320px; }
 .alert-gap { margin-bottom: 12px; }
+.dropzone {
+  display: flex; align-items: center; gap: 12px; justify-content: center;
+  border: 2px dashed #c0c4cc; border-radius: 8px; padding: 20px; margin-bottom: 12px;
+  background: #fafafa; flex-wrap: wrap;
+  .dz-icon { font-size: 28px; color: #409eff; }
+  .dz-text { color: #606266; font-size: 13px; }
+}
+.dropzone:hover { border-color: #409eff; background: #ecf5ff; }
+.hidden-input { display: none; }
+.upload-progress { margin-bottom: 4px; }
+.upload-hint { font-size: 12px; color: #909399; margin-bottom: 12px; }
+.drag-item { cursor: grab; }
+.drop-target { cursor: grab; }
 .file-content { background: #0d1117; color: #c9d1d9; padding: 16px; border-radius: 6px; font-size: 12px; max-height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-all; }
 </style>

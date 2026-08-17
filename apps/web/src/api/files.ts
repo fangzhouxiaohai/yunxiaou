@@ -37,3 +37,32 @@ export function renameFile(serverId: string, path: string, newName: string) {
 export function chmodFile(serverId: string, path: string, mode: string) {
   return request.post(`/servers/${serverId}/files/chmod`, { path, mode })
 }
+
+export function uploadFiles(
+  serverId: string,
+  targetPath: string,
+  files: File[],
+  onProgress?: (percent: number) => void
+) {
+  const form = new FormData()
+  form.append('path', targetPath)
+  for (const f of files) {
+    form.append('files', f, f.name)
+    const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
+    form.append('paths', rel)
+  }
+  return request.post(`/servers/${serverId}/files/upload`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: (e) => {
+      if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100))
+    },
+  }) as Promise<{ uploaded: number; targetDir: string }>
+}
+
+export function moveFile(serverId: string, path: string, targetDir: string, confirm: boolean) {
+  return request.post(`/servers/${serverId}/files/move`, { path, targetDir, confirm })
+}
+
+export function copyFile(serverId: string, path: string, targetDir: string) {
+  return request.post(`/servers/${serverId}/files/copy`, { path, targetDir })
+}

@@ -137,6 +137,21 @@ class ConnectionPool {
     }
   }
 
+  // 通过 SFTP 上传本地文件到远端（复用池内连接）
+  async sftpPut(cfg, localPath, remotePath) {
+    const entry = await this.getConnection(cfg);
+    try {
+      await new Promise((resolve, reject) => {
+        entry.client.sftp((err, sftp) => {
+          if (err) return reject(err);
+          sftp.fastPut(localPath, remotePath, (err2) => (err2 ? reject(err2) : resolve()));
+        });
+      });
+    } finally {
+      this.release(entry);
+    }
+  }
+
   closeKey(cfg) {
     const key = this.keyFor(cfg);
     const entry = this.entries.get(key);
