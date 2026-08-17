@@ -3,6 +3,14 @@
     <el-empty description="请先在「服务器管理」中添加并选择服务器" />
   </div>
   <div v-else>
+    <div class="page-header">
+      <span class="page-title">文件管理</span>
+      <div class="page-actions">
+        <el-button size="small" type="primary" @click="newFileDialog = true">新建文件</el-button>
+        <el-button size="small" type="primary" plain @click="mkdirDialog = true">新建文件夹</el-button>
+        <el-button size="small" @click="load">刷新</el-button>
+      </div>
+    </div>
     <el-card>
       <div class="toolbar">
         <el-input v-model="pathInput" class="path-input" placeholder="输入路径回车跳转，如 /www 或 /root" @keyup.enter="jumpTo">
@@ -13,11 +21,6 @@
             <a href="javascript:;" @click.prevent="goTo(i)">{{ seg }}</a>
           </el-breadcrumb-item>
         </el-breadcrumb>
-        <div>
-          <el-button size="small" type="primary" @click="newFileDialog = true">新建文件</el-button>
-          <el-button size="small" type="primary" plain @click="mkdirDialog = true">新建文件夹</el-button>
-          <el-button size="small" @click="load">刷新</el-button>
-        </div>
       </div>
       <el-alert
         v-if="listError"
@@ -84,11 +87,11 @@
       </el-table>
     </el-card>
 
-    <el-dialog v-model="viewDialog" title="文件内容" width="70%">
-      <pre class="file-content">{{ fileContent }}</pre>
+    <el-dialog v-model="viewDialog" title="文件内容" width="min(900px, 92vw)">
+      <pre class="code-box">{{ fileContent }}</pre>
     </el-dialog>
 
-    <el-dialog v-model="editDialog" title="编辑文件" width="70%">
+    <el-dialog v-model="editDialog" title="编辑文件" width="min(900px, 92vw)">
       <el-input v-model="editContent" type="textarea" :rows="16" />
       <template #footer>
         <el-button @click="editDialog = false">取消</el-button>
@@ -96,7 +99,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="mkdirDialog" title="新建文件夹" width="400px">
+    <el-dialog v-model="mkdirDialog" title="新建文件夹" width="min(400px, 92vw)">
       <el-input v-model="mkdirName" placeholder="文件夹名" @keyup.enter="onMkdir" />
       <template #footer>
         <el-button @click="mkdirDialog = false">取消</el-button>
@@ -104,7 +107,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="newFileDialog" title="新建文件" width="400px">
+    <el-dialog v-model="newFileDialog" title="新建文件" width="min(400px, 92vw)">
       <el-input v-model="newFileName" placeholder="文件名，如 notes.txt" @keyup.enter="onNewFile" />
       <template #footer>
         <el-button @click="newFileDialog = false">取消</el-button>
@@ -112,7 +115,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="renameDialog" title="重命名" width="400px">
+    <el-dialog v-model="renameDialog" title="重命名" width="min(400px, 92vw)">
       <el-input v-model="renameTo" @keyup.enter="onRenameConfirm" />
       <template #footer>
         <el-button @click="renameDialog = false">取消</el-button>
@@ -120,7 +123,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="chmodDialog" title="修改权限" width="400px">
+    <el-dialog v-model="chmodDialog" title="修改权限" width="min(400px, 92vw)">
       <el-input v-model="chmodMode" placeholder="如 755" @keyup.enter="onChmodConfirm" />
       <template #footer>
         <el-button @click="chmodDialog = false">取消</el-button>
@@ -128,7 +131,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="copyDialog" title="复制到目录" width="440px">
+    <el-dialog v-model="copyDialog" title="复制到目录" width="min(440px, 92vw)">
       <el-input v-model="copyTarget" placeholder="目标目录，如 /www/app/sub" @keyup.enter="onCopyConfirm" />
       <template #footer>
         <el-button @click="copyDialog = false">取消</el-button>
@@ -136,7 +139,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="moveDialog" title="移动到目录" width="440px">
+    <el-dialog v-model="moveDialog" title="移动到目录" width="min(440px, 92vw)">
       <el-input v-model="moveTarget" placeholder="目标目录，如 /www/app/sub" @keyup.enter="onMoveConfirm" />
       <template #footer>
         <el-button @click="moveDialog = false">取消</el-button>
@@ -404,8 +407,8 @@ onMounted(load)
 </script>
 
 <style scoped lang="scss">
-.toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; }
-.path-input { width: 320px; }
+.toolbar { display: flex; align-items: center; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; }
+.path-input { width: min(320px, 60vw); }
 .alert-gap { margin-bottom: 12px; }
 .dropzone {
   display: flex; align-items: center; gap: 12px; justify-content: center;
@@ -420,5 +423,5 @@ onMounted(load)
 .upload-hint { font-size: 12px; color: #909399; margin-bottom: 12px; }
 .drag-item { cursor: grab; }
 .drop-target { cursor: grab; }
-.file-content { background: #0d1117; color: #c9d1d9; padding: 16px; border-radius: 6px; font-size: 12px; max-height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+.code-box { max-height: 60vh; }
 </style>

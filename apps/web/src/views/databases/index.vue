@@ -2,7 +2,12 @@
   <div v-if="!serverStore.current">
     <el-empty description="请先在「服务器管理」中添加并选择服务器" />
   </div>
-  <el-tabs v-else v-model="activeTab">
+  <div v-else>
+    <div class="page-header">
+      <span class="page-title">数据库管理</span>
+      <div class="page-actions"></div>
+    </div>
+    <el-tabs v-model="activeTab">
     <el-tab-pane label="MySQL/MariaDB" name="mysql">
       <!-- 库列表 -->
       <el-card v-if="dbView === 'list'">
@@ -31,7 +36,7 @@
 
       <!-- 表列表 -->
       <el-card v-else-if="dbView === 'tables'">
-        <el-page-header class="page-header" @back="dbView = 'list'">
+        <el-page-header class="db-page-header" @back="dbView = 'list'">
           <template #content>{{ currentDb }} 的表</template>
           <template #extra>
             <el-button type="primary" size="small" @click="dbView = 'sql'">SQL</el-button>
@@ -51,7 +56,7 @@
 
       <!-- 表结构 -->
       <el-card v-else-if="dbView === 'structure'">
-        <el-page-header class="page-header" @back="dbView = 'tables'">
+        <el-page-header class="db-page-header" @back="dbView = 'tables'">
           <template #content>{{ currentDb }}.{{ currentTable }} 结构</template>
         </el-page-header>
         <el-table :data="structureRows" v-loading="panelLoading" class="table-gap" border size="small">
@@ -61,7 +66,7 @@
 
       <!-- 数据浏览 -->
       <el-card v-else-if="dbView === 'rows'">
-        <el-page-header class="page-header" @back="dbView = 'tables'">
+        <el-page-header class="db-page-header" @back="dbView = 'tables'">
           <template #content>{{ currentDb }}.{{ currentTable }} 数据（共 {{ rowsTotal }} 行）</template>
           <template #extra>
             <el-button size="small" @click="loadRows">刷新</el-button>
@@ -89,7 +94,7 @@
 
       <!-- SQL 执行 -->
       <el-card v-else-if="dbView === 'sql'">
-        <el-page-header class="page-header" @back="dbView = 'tables'">
+        <el-page-header class="db-page-header" @back="dbView = 'tables'">
           <template #content>在 {{ currentDb }} 中执行 SQL</template>
         </el-page-header>
         <el-input
@@ -134,10 +139,10 @@
       />
       <template v-else>
       <el-row :gutter="16">
-        <el-col :span="6"><el-card><div class="stat"><div class="label">版本</div><div class="value">{{ redisInfo?.version || '--' }}</div></div></el-card></el-col>
-        <el-col :span="6"><el-card><div class="stat"><div class="label">内存占用</div><div class="value">{{ memText }}</div></div></el-card></el-col>
-        <el-col :span="6"><el-card><div class="stat"><div class="label">连接数</div><div class="value">{{ redisInfo?.connectedClients ?? '--' }}</div></div></el-card></el-col>
-        <el-col :span="6"><el-card><div class="stat"><div class="label">命中率</div><div class="value">{{ redisInfo ? redisInfo.hitRate + '%' : '--' }}</div></div></el-card></el-col>
+        <el-col :xs="24" :sm="12" :lg="6"><el-card><div class="stat"><div class="label">版本</div><div class="value">{{ redisInfo?.version || '--' }}</div></div></el-card></el-col>
+        <el-col :xs="24" :sm="12" :lg="6"><el-card><div class="stat"><div class="label">内存占用</div><div class="value">{{ memText }}</div></div></el-card></el-col>
+        <el-col :xs="24" :sm="12" :lg="6"><el-card><div class="stat"><div class="label">连接数</div><div class="value">{{ redisInfo?.connectedClients ?? '--' }}</div></div></el-card></el-col>
+        <el-col :xs="24" :sm="12" :lg="6"><el-card><div class="stat"><div class="label">命中率</div><div class="value">{{ redisInfo ? redisInfo.hitRate + '%' : '--' }}</div></div></el-card></el-col>
       </el-row>
       <el-card class="row-gap">
         <template #header>
@@ -156,8 +161,9 @@
       </template>
     </el-tab-pane>
   </el-tabs>
+  </div>
 
-  <el-dialog v-model="dbDialogVisible" title="创建数据库" width="440px">
+  <el-dialog v-model="dbDialogVisible" title="创建数据库" width="min(440px, 92vw)">
     <el-form :model="dbForm" label-width="90px">
       <el-form-item label="数据库名" required>
         <el-input v-model="dbForm.name" placeholder="字母/数字/下划线" />
@@ -388,7 +394,7 @@ async function onFlushRedis() {
 .hint { font-size: 12px; color: #909399; }
 .alert-gap { margin-bottom: 16px; }
 .row-gap { margin-top: 16px; }
-.page-header { margin-bottom: 16px; }
+.db-page-header { margin-bottom: 16px; }
 .table-gap { margin-top: 16px; }
 .stat {
   .label { font-size: 13px; color: #909399; margin-bottom: 8px; }

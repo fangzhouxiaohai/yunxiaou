@@ -3,12 +3,15 @@
     <el-empty description="请先在「服务器管理」中添加并选择服务器" />
   </div>
   <div v-else>
-    <el-card>
-      <div class="toolbar">
+    <div class="page-header">
+      <span class="page-title">项目</span>
+      <div class="page-actions">
         <el-button type="primary" @click="dialogVisible = true">创建项目</el-button>
         <el-button @click="load">刷新</el-button>
-        <span class="hint">PHP 项目走 Nginx+php-fpm；Node/Python/Java 项目走 systemd 服务（linuxmgr- 前缀）</span>
       </div>
+    </div>
+    <el-card>
+      <div class="hint">PHP 项目走 Nginx+php-fpm；Node/Python/Java 项目走 systemd 服务（linuxmgr- 前缀）</div>
       <el-table :data="projects" v-loading="loading">
         <el-table-column prop="name" label="项目名" min-width="180" />
         <el-table-column label="类型" width="100">
@@ -55,7 +58,7 @@
       </el-table>
     </el-card>
 
-    <el-dialog v-model="dialogVisible" title="创建项目" width="540px">
+    <el-dialog v-model="dialogVisible" title="创建项目" width="min(540px, 92vw)">
       <el-form :model="form" label-width="100px">
         <el-form-item label="项目名" required>
           <el-input v-model="form.name" placeholder="字母/数字/_-（将加 linuxmgr- 前缀）" />
@@ -92,17 +95,17 @@
       </template>
     </el-dialog>
 
-    <el-drawer v-model="logDrawer" title="项目日志" size="60%">
+    <el-drawer v-model="logDrawer" title="项目日志" :size="drawerSize">
       <div class="log-toolbar">
         <el-button size="small" @click="loadLogs">刷新</el-button>
       </div>
-      <pre class="log-box">{{ logs }}</pre>
+      <pre class="code-box">{{ logs }}</pre>
     </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   controlProject, createProject, deleteProject, getProjectLogs, listProjects, type Project,
@@ -121,6 +124,8 @@ const form = reactive({
 const logDrawer = ref(false)
 const logs = ref('')
 let logProjectName = ''
+
+const drawerSize = computed(() => (window.innerWidth < 768 ? '100%' : '60%'))
 
 async function load() {
   if (!serverStore.currentId) return
@@ -199,12 +204,7 @@ async function onDelete(row: Project) {
 </script>
 
 <style scoped lang="scss">
-.toolbar { margin-bottom: 16px; display: flex; align-items: center; gap: 12px; }
-.hint { font-size: 12px; color: #909399; }
+.hint { font-size: 12px; color: #909399; margin-bottom: 16px; }
 .log-toolbar { margin-bottom: 12px; }
-.log-box {
-  background: #0d1117; color: #c9d1d9; padding: 16px; border-radius: 6px;
-  font-size: 12px; line-height: 1.6; max-height: 70vh; overflow: auto;
-  white-space: pre-wrap; word-break: break-all;
-}
+.code-box { max-height: 70vh; }
 </style>

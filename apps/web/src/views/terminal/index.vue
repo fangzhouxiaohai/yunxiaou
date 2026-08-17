@@ -108,10 +108,11 @@ onBeforeUnmount(() => {
 <style scoped lang="scss">
 .term-toolbar {
   display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;
+  flex-wrap: wrap; gap: 8px;
   .term-title { font-weight: 600; }
 }
 .term-box {
-  height: calc(100vh - 220px); min-height: 400px; background: #0d1117;
+  height: calc(100vh - 200px); min-height: 400px; background: #0d1117;
   border-radius: 6px; overflow: hidden; padding: 8px;
 }
 </style>
