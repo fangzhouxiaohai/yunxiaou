@@ -12,6 +12,7 @@ const createMonitorRouter = require('./routes/monitor');
 const createDatabaseRouter = require('./routes/database');
 const createStoreRouter = require('./routes/store');
 const createSupervisorRouter = require('./routes/supervisor');
+const createDiskRouter = require('./routes/disk');
 
 function createApp({ config, pool, stores }) {
   const app = express();
@@ -22,6 +23,7 @@ function createApp({ config, pool, stores }) {
   app.use('/api', requireAuth(config), createDatabaseRouter({ config, pool, store: stores.servers }));
   app.use('/api', requireAuth(config), createStoreRouter({ config, pool, store: stores.servers }));
   app.use('/api', requireAuth(config), createSupervisorRouter({ config, pool, store: stores.servers }));
+  app.use('/api', requireAuth(config), createDiskRouter({ config, pool, store: stores.servers }));
   app.use('/api/servers', requireAuth(config), createServersRouter({ config, pool, store: stores.servers }));
 
   const webDist = path.join(__dirname, '..', '..', 'apps', 'web', 'dist');

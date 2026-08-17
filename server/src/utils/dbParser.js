@@ -34,4 +34,33 @@ function parseRedisInfo(output) {
   };
 }
 
-module.exports = { parseDatabases, parseRedisInfo };
+function parseLsblk(output) {
+  const disks = [];
+  let current = null;
+  for (const line of output.split('\n')) {
+    const t = line.trim();
+    if (!t || t === 'NAME SIZE TYPE MOUNTPOINT') continue;
+    const m = t.match(/^([├└]─)?(\S+)\s+(\S+)\s+(\S+)\s*(\S*)/);
+    if (!m) continue;
+    const [, tree, name, size, type, mount] = m;
+    if (!tree) {
+      current = { name, size, type, partitions: [] };
+      disks.push(current);
+    } else if (current) {
+      current.partitions.push({ name, size, type, mount: mount || '' });
+    }
+  }
+  return disks;
+}
+
+function parseDf(output) {
+  return output.split('\n').filter((l) => /^\//.test(l.trim())).map((line) => {
+    const parts = line.trim().split(/\s+/);
+    return {
+      fs: parts[0], size: parts[1], used: parts[2], avail: parts[3],
+      percent: parseInt(parts[4].replace('%', ''), 10), mount: parts[5],
+    };
+  });
+}
+
+module.exports = { parseDatabases, parseRedisInfo, parseLsblk, parseDf };
