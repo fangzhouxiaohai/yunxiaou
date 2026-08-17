@@ -1088,6 +1088,32 @@ git commit -m "docs: 网站管理站点设置与文件多标签页说明"
 
 ---
 
+## 任务 9：登录页升级为左右分栏布局
+
+**文件：**
+- 修改：`apps/web/src/views/login/index.vue`
+
+- [ ] **步骤 1：调整模板与样式**
+
+在现有登录页（上轮已重做：品牌区 + 渐变光晕背景 + rise 动画）基础上升级为左右分栏：
+
+- `.login-page` 内改为一个 `login-panel` 容器（flex，宽 min(880px, 94vw)，高 min(560px, 82vh)，12px 圆角、大投影、overflow hidden、rise 动画）
+- 左侧 `.brand-side`（flex 1，深蓝渐变背景 + 双层 radial-gradient 光晕 + 细网格纹理 background-image: repeating-linear-gradient 半透明线）：产品名「云小U」（28px 700）、副标题「服务器管理面板」、三条特性列表（多服务器集中管理 / 网站与数据库一站式运维 / 安全可靠 · 操作留痕），每条前置小圆点；文字白色系
+- 右侧 `.form-side`（宽 400px，背景 var(--bg-card)，padding 40px 36px，flex 居中）：标题「欢迎登录」（20px 600）+ 副提示（13px text-3）+ 原有表单（大号输入框带前缀图标、全宽登录按钮）
+- 响应式：`@media (max-width: 767px)` 时 `.brand-side { display: none }`，`.login-panel` 高度自适应，`.form-side` 宽度 100%
+- 登录逻辑（onSubmit / userStore.login）不动
+
+- [ ] **步骤 2：构建验证 + Commit**
+
+运行：`cd apps/web && npm run build`，预期成功
+
+```bash
+git add apps/web/src/views/login/index.vue
+git commit -m "feat(web): 登录页升级左右分栏布局"
+```
+
+---
+
 ## 自检记录
 
 - 规格 A（菜单改名）→ 任务 1；规格 B（站点设置）→ 任务 2-6（vhost 纯函数 2、创建接入 3、settings 接口 4、预览/日志/SSL 5、前端 6）；规格 C（文件多标签）→ 任务 7；验证 → 任务 8
