@@ -51,6 +51,7 @@
               :loading="acting === `${row.name}:restart`"
               @click="onControl(row, 'restart')"
             >重启</el-button>
+            <el-button link type="primary" @click="onSettings(row)">设置</el-button>
             <el-button link type="info" @click="onLogs(row)">日志</el-button>
             <el-button link type="danger" @click="onDelete(row)">删除</el-button>
           </template>
@@ -85,6 +86,17 @@
             <el-option v-for="v in ['php74', 'php80', 'php81', 'php82', 'php83']" :key="v" :label="v" :value="v" />
           </el-select>
         </el-form-item>
+        <el-form-item v-if="form.type === 'php'" label="伪静态">
+          <el-select v-model="form.rewritePreset">
+            <el-option label="不使用" value="none" />
+            <el-option label="ThinkPHP" value="thinkphp" />
+            <el-option label="Laravel" value="laravel" />
+            <el-option label="WordPress" value="wordpress" />
+            <el-option label="Typecho" value="typecho" />
+            <el-option label="Emlog" value="emlog" />
+            <el-option label="Discuz" value="discuz" />
+          </el-select>
+        </el-form-item>
         <el-form-item v-else label="启动命令" required>
           <el-input v-model="form.entry" placeholder="如 node server.js / python3 app.py / java -jar app.jar" />
         </el-form-item>
@@ -101,6 +113,8 @@
       </div>
       <pre class="code-box">{{ logs }}</pre>
     </el-drawer>
+
+    <SettingsDrawer v-model="settingsVisible" :server-id="serverStore.currentId || ''" :project="currentProject" />
   </div>
 </template>
 
@@ -110,6 +124,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   controlProject, createProject, deleteProject, getProjectLogs, listProjects, type Project,
 } from '@/api/projects'
+import SettingsDrawer from './SettingsDrawer.vue'
 import { useServerStore } from '@/stores/server'
 
 const serverStore = useServerStore()
@@ -120,10 +135,13 @@ const saving = ref(false)
 const dialogVisible = ref(false)
 const form = reactive({
   name: '', type: 'node', directory: '', port: 3000, entry: '', phpVersion: 'php82', domain: '',
+  rewritePreset: 'none',
 })
 const logDrawer = ref(false)
 const logs = ref('')
 let logProjectName = ''
+const settingsVisible = ref(false)
+const currentProject = ref<Project | null>(null)
 
 const drawerSize = computed(() => (window.innerWidth < 768 ? '100%' : '60%'))
 
@@ -153,8 +171,10 @@ async function onCreate() {
     const payload: Record<string, unknown> = {
       name: form.name, type: form.type, directory: form.directory, port: form.port,
     }
-    if (form.type === 'php') payload.phpVersion = form.phpVersion
-    else payload.entry = form.entry
+    if (form.type === 'php') {
+      payload.phpVersion = form.phpVersion
+      payload.rewritePreset = form.rewritePreset
+    } else payload.entry = form.entry
     if (form.domain.trim()) payload.domain = form.domain.trim()
     await createProject(serverStore.currentId!, payload as never)
     ElMessage.success('项目创建成功')
@@ -177,6 +197,11 @@ async function onControl(row: Project, action: 'start' | 'stop' | 'restart') {
   } finally {
     acting.value = ''
   }
+}
+
+function onSettings(row: Project) {
+  currentProject.value = row
+  settingsVisible.value = true
 }
 
 async function onLogs(row: Project) {
