@@ -38,6 +38,7 @@
 | 📜 日志 | 常用日志列表与实时 tail |
 | ⏰ 计划任务 | 周期选择器（每分钟/小时/天/周/月），任务类型：Shell / URL GET / URL POST / Python 脚本 |
 | 🔐 SSL 证书 | 项目域名下拉生成自签证书、上传证书、**自动续期**（剩余 30 天自动更新）、vhost 自动关联 443 |
+| 🎨 界面 | 亮色/暗色模式切换、响应式布局（支持移动端）、修改密码 |
 
 ## 安全设计
 
@@ -49,6 +50,7 @@
 - 🏷️ 所有新增配置统一 `linuxmgr-` 前缀，**不修改服务器任何已有配置**；Nginx 只用 reload 不重启
 - 📋 全部写操作二次确认 + 审计日志（`data/audit.log`）
 - ⚠️ 无 WHERE 的 DELETE/UPDATE、`curl | bash` 等危险操作被拦截
+- 🔐 支持在线修改管理员密码（scrypt 加盐哈希存储于 data/auth.json；已签发的 JWT 在 24h 有效期内仍然可用）
 
 ## 技术架构
 
@@ -82,7 +84,7 @@ npm run dev            # http://localhost:5173，/api 代理到 3000
 cd apps/web && npm run build
 ```
 
-首次使用：浏览器打开 `http://localhost:5173`，用 `.env` 中的管理员账号登录，然后在「服务器管理」中添加你的 Linux 服务器（root 或 sudo 用户），即可开始管理。
+首次使用：浏览器打开 `http://localhost:5173`，使用默认账号 `admin`、默认密码 `123456` 登录（`.env` 中 `ADMIN_PASSWORD` 显式设置时以 `.env` 为准），然后在「服务器管理」中添加你的 Linux 服务器（root 或 sudo 用户），即可开始管理。
 
 ## 目录结构
 
