@@ -2984,12 +2984,26 @@ function createDatabaseRouter({ config, pool, store }) {
     }
   }
 
-  // mysql 客户端命令前缀：配置了密码用 -p，否则尝试 sudo mysql
-  function mysqlCmd(server, sql, res) {
+  // mysql 认证参数：配置了密码用 -p，否则走 sudo（auth_socket）
+  function mysqlAuth(server, res) {
     const pwd = passwordOf(server, 'mysqlPasswordEnc', res);
-    if (pwd === undefined) return null;
-    if (pwd) return `mysql -u root -p'${pwd.replace(/'/g, "'\\''")}' -N -e "${sql}"`;
+    if (pwd === undefined) return null; // 解密失败
+    if (pwd) return `-u root -p'${pwd.replace(/'/g, "'\\''")}'`;
+    return ''; // sudo 模式
+  }
+
+  function mysqlCmd(server, sql, res) {
+    const auth = mysqlAuth(server, res);
+    if (auth === null) return null;
+    if (auth) return `mysql ${auth} -N -e "${sql}"`;
     return `sudo mysql -N -e "${sql}"`;
+  }
+
+  function mysqldumpCmd(server, db, res) {
+    const auth = mysqlAuth(server, res);
+    if (auth === null) return null;
+    if (auth) return `mysqldump ${auth} --single-transaction ${db}`;
+    return `sudo mysqldump --single-transaction ${db}`;
   }
 
   router.get('/servers/:id/databases', async (req, res) => {
@@ -3046,7 +3060,9 @@ function createDatabaseRouter({ config, pool, store }) {
     const sshCfg = { host: server.host, port: server.port, username: server.username, password: passwordOf(server, 'passwordEnc', res) };
     try {
       const backupDir = '/tmp/linuxmgr-db-backup';
-      const backupCmd = `mkdir -p ${backupDir} && ${mysqlCmd(server, `SELECT 1`, res).replace('mysql', 'mysqldump').replace(/-N -e/, '')} \`${name}\` > ${backupDir}/${name}-$(date +%Y%m%d%H%M%S).sql`;
+      const dump = mysqldumpCmd(server, name, res);
+      if (dump === null) return;
+      const backupCmd = `mkdir -p ${backupDir} && ${dump} > ${backupDir}/${name}-$(date +%Y%m%d%H%M%S).sql`;
       const backup = await pool.run(sshCfg, backupCmd);
       if (backup.code !== 0) throw new Error(`备份失败: ${backup.stderr.slice(0, 200)}`);
       const cmd = mysqlCmd(server, `DROP DATABASE \`${name}\``, res);
