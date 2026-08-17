@@ -8,15 +8,15 @@
     active-text-color="#ffffff"
     @select="emit('select')"
   >
-    <el-menu-item index="/dashboard"><el-icon><Odometer /></el-icon><span>监控大盘</span></el-menu-item>
+    <el-menu-item index="/dashboard"><el-icon><Odometer /></el-icon><span>数据监控</span></el-menu-item>
     <el-menu-item index="/servers"><el-icon><Monitor /></el-icon><span>服务器管理</span></el-menu-item>
     <el-menu-item index="/databases"><el-icon><Coin /></el-icon><span>数据库管理</span></el-menu-item>
     <el-menu-item index="/store"><el-icon><Shop /></el-icon><span>软件商店</span></el-menu-item>
     <el-menu-item index="/disk"><el-icon><Files /></el-icon><span>磁盘管理</span></el-menu-item>
     <el-menu-item index="/supervisor"><el-icon><Cpu /></el-icon><span>进程守护</span></el-menu-item>
-    <el-menu-item index="/projects"><el-icon><Box /></el-icon><span>项目</span></el-menu-item>
-    <el-menu-item index="/terminal"><el-icon><Monitor /></el-icon><span>终端</span></el-menu-item>
-    <el-menu-item index="/logs"><el-icon><Document /></el-icon><span>日志</span></el-menu-item>
+    <el-menu-item index="/projects"><el-icon><Box /></el-icon><span>网站管理</span></el-menu-item>
+    <el-menu-item index="/terminal"><el-icon><Monitor /></el-icon><span>命令终端</span></el-menu-item>
+    <el-menu-item index="/logs"><el-icon><Document /></el-icon><span>日志管理</span></el-menu-item>
     <el-menu-item index="/crontab"><el-icon><AlarmClock /></el-icon><span>计划任务</span></el-menu-item>
     <el-menu-item index="/files"><el-icon><Folder /></el-icon><span>文件管理</span></el-menu-item>
     <el-menu-item index="/ssl"><el-icon><Lock /></el-icon><span>SSL 证书</span></el-menu-item>

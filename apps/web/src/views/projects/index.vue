@@ -4,9 +4,9 @@
   </div>
   <div v-else>
     <div class="page-header">
-      <span class="page-title">项目</span>
+      <span class="page-title">网站管理</span>
       <div class="page-actions">
-        <el-button type="primary" @click="dialogVisible = true">创建项目</el-button>
+        <el-button type="primary" @click="dialogVisible = true">创建网站</el-button>
         <el-button @click="load">刷新</el-button>
       </div>
     </div>
@@ -58,7 +58,7 @@
       </el-table>
     </el-card>
 
-    <el-dialog v-model="dialogVisible" title="创建项目" width="min(540px, 92vw)">
+    <el-dialog v-model="dialogVisible" title="创建网站" width="min(540px, 92vw)">
       <el-form :model="form" label-width="100px">
         <el-form-item label="项目名" required>
           <el-input v-model="form.name" placeholder="字母/数字/_-（将加 linuxmgr- 前缀）" />
@@ -95,7 +95,7 @@
       </template>
     </el-dialog>
 
-    <el-drawer v-model="logDrawer" title="项目日志" :size="drawerSize">
+    <el-drawer v-model="logDrawer" title="网站日志" :size="drawerSize">
       <div class="log-toolbar">
         <el-button size="small" @click="loadLogs">刷新</el-button>
       </div>
@@ -193,8 +193,8 @@ async function loadLogs() {
 
 async function onDelete(row: Project) {
   await ElMessageBox.confirm(
-    `确定删除项目「${row.name}」吗？将停止并移除其服务配置（vhost 备份在服务器 /tmp/linuxmgr-backup/）。`,
-    '删除项目',
+    `确定删除网站「${row.name}」吗？将停止并移除其服务配置（vhost 备份在服务器 /tmp/linuxmgr-backup/）。`,
+    '删除网站',
     { type: 'warning' }
   )
   await deleteProject(serverStore.currentId!, row.name, true)

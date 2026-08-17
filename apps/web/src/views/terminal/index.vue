@@ -5,7 +5,7 @@
   <div v-else>
     <el-card>
       <div class="term-toolbar">
-        <span class="term-title">终端 — {{ serverStore.current.host }}</span>
+        <span class="term-title">命令终端 — {{ serverStore.current.host }}</span>
         <div>
           <el-button size="small" type="primary" :disabled="connected" @click="connect">连接</el-button>
           <el-button size="small" type="danger" :disabled="!connected" @click="disconnect">断开</el-button>

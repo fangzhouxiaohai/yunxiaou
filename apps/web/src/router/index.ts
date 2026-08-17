@@ -13,7 +13,7 @@ const router = createRouter({
           path: 'dashboard',
           name: 'Dashboard',
           component: () => import('@/views/dashboard/index.vue'),
-          meta: { title: '监控大盘' },
+          meta: { title: '数据监控' },
         },
         {
           path: 'servers',
@@ -49,19 +49,19 @@ const router = createRouter({
           path: 'projects',
           name: 'Projects',
           component: () => import('@/views/projects/index.vue'),
-          meta: { title: '项目' },
+          meta: { title: '网站管理' },
         },
         {
           path: 'terminal',
           name: 'Terminal',
           component: () => import('@/views/terminal/index.vue'),
-          meta: { title: '终端' },
+          meta: { title: '命令终端' },
         },
         {
           path: 'logs',
           name: 'Logs',
           component: () => import('@/views/logs/index.vue'),
-          meta: { title: '日志' },
+          meta: { title: '日志管理' },
         },
         {
           path: 'crontab',
