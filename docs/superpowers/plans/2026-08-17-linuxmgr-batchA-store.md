@@ -544,7 +544,7 @@ test('安装 MySQL 8.0（官方源）', async () => {
 //   新实例端口分配：已占用 3306 → 3307 → 3308（grep 端口占用检测）
 //   安装后：systemctl enable --now <service>；数据目录 /var/lib/mysql-<version>（新建实例时配置 my.cnf 片段，不触碰已有配置）
 // POST /servers/:id/mysql/switch { service, confirm }
-//   停所有其他 mysql/mariadb 实例 → 启动目标实例（审计 + 二次确认）
+//   停所有其他 mysql 实例 → 启动目标实例（审计 + 二次确认）
 // 所有命令白名单校验：service 名 ^[a-zA-Z0-9_-]+$
 ```
 

@@ -1,5 +1,5 @@
 const express = require('express');
-const { decrypt } = require('../crypto/cipher');
+const { encrypt, decrypt } = require('../crypto/cipher');
 const { parseDatabases, parseRedisInfo, parseBatchResult } = require('../utils/dbParser');
 const { audit } = require('../utils/audit');
 
@@ -48,8 +48,8 @@ function createDatabaseRouter({ config, pool, store }) {
   function mysqlCmd(server, sql, res) {
     const auth = mysqlAuth(server, res);
     if (auth === null) return null;
-    if (auth) return `mysql ${auth} -N -e "${bashEscape(sql)}"`;
-    return `sudo mysql -N -e "${bashEscape(sql)}"`;
+    if (auth) return `mysql ${auth} --default-character-set=utf8mb4 -N -e "${bashEscape(sql)}"`;
+    return `sudo mysql --default-character-set=utf8mb4 -N -e "${bashEscape(sql)}"`;
   }
 
   function mysqldumpCmd(server, db, res) {
@@ -63,8 +63,9 @@ function createDatabaseRouter({ config, pool, store }) {
   function mysqlBatchCmd(server, sql, res) {
     const auth = mysqlAuth(server, res);
     if (auth === null) return null;
-    if (auth) return `mysql ${auth} -B -e "${bashEscape(sql)}"`;
-    return `sudo mysql -B -e "${bashEscape(sql)}"`;
+    // 指定 utf8mb4，否则含中文的 SQL（注释、数据）经 SSH 写入会因客户端字符集不对而乱码
+    if (auth) return `mysql ${auth} --default-character-set=utf8mb4 -B -e "${bashEscape(sql)}"`;
+    return `sudo mysql --default-character-set=utf8mb4 -B -e "${bashEscape(sql)}"`;
   }
 
   // SQL 安全检查：只读放行；写操作需 confirm；无 WHERE 的全表 DELETE/UPDATE 直接拒绝
@@ -321,7 +322,7 @@ function createDatabaseRouter({ config, pool, store }) {
       // 多实例并存自动配置风险高：已有实例时拒绝自动安装（8.1 约束）
       const svc = await pool.run(cfg, LIST_SERVICES_CMD);
       if (parseServices(svc.stdout || '').length > 0) {
-        return res.status(400).json({ code: 400, message: '服务器已存在 MySQL/MariaDB 实例，自动安装多实例可能影响现有服务；请在人工确认后手动安装' });
+        return res.status(400).json({ code: 400, message: '服务器已存在 MySQL 实例，自动安装多实例可能影响现有服务；请在人工确认后手动安装' });
       }
       const cmds = [];
       if (target.rpm) cmds.push(`rpm -Uvh ${target.rpm}`);
@@ -351,7 +352,7 @@ function createDatabaseRouter({ config, pool, store }) {
     try {
       const svc = await pool.run(cfg, LIST_SERVICES_CMD);
       const instances = parseServices(svc.stdout || '');
-      if (instances.length === 0) return res.status(400).json({ code: 400, message: '未发现 MySQL/MariaDB 实例' });
+      if (instances.length === 0) return res.status(400).json({ code: 400, message: '未发现 MySQL 实例' });
       if (!instances.some((i) => i.service === service)) {
         return res.status(400).json({ code: 400, message: `未找到服务 ${service}` });
       }
@@ -367,6 +368,51 @@ function createDatabaseRouter({ config, pool, store }) {
       res.json({ code: 0, data: { defaultService: service } });
     } catch (err) {
       res.status(502).json({ code: 502, message: `切换失败: ${err.message}` });
+    }
+  });
+
+  // ===== MySQL root 密码管理 =====
+
+  // 查看当前保存的 root 密码（未配置时 password 为 null，表示走 sudo/auth_socket）
+  router.get('/servers/:id/mysql/root-password', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (!server.mysqlPasswordEnc) return res.json({ code: 0, data: { configured: false, password: null } });
+    const pwd = passwordOf(server, 'mysqlPasswordEnc', res);
+    if (pwd === undefined) return;
+    res.json({ code: 0, data: { configured: true, password: pwd } });
+  });
+
+  // 重置 root 密码：ALTER USER → 成功后更新面板保存的凭据
+  router.post('/servers/:id/mysql/root-password/reset', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (req.body?.confirm !== true) return res.status(400).json({ code: 400, message: '危险操作需确认（confirm: true）' });
+    const newPassword = String(req.body?.newPassword || '');
+    if (newPassword.length < 8 || newPassword.length > 64) {
+      return res.status(400).json({ code: 400, message: '密码长度需在 8-64 位之间' });
+    }
+    if (/['"\\]/.test(newPassword)) return res.status(400).json({ code: 400, message: '密码不能包含引号或反斜杠' });
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    const sql = `ALTER USER 'root'@'localhost' IDENTIFIED BY '${newPassword}'; FLUSH PRIVILEGES`;
+    const cmd = mysqlCmd(server, sql, res);
+    if (cmd === null) return;
+    try {
+      const r = await pool.run(cfg, cmd);
+      if (r.code !== 0) throw new Error(r.stderr.slice(0, 200) || `退出码 ${r.code}`);
+      // 更新面板保存的凭据，保证后续操作使用新密码
+      const list = store.read();
+      const target = list.find((s) => s.id === server.id);
+      if (target) {
+        target.mysqlPasswordEnc = encrypt(newPassword, config.masterKey);
+        store.write(list);
+      }
+      audit(config.dataDir, { action: 'mysql.root-password.reset', target: server.host, result: 'success' });
+      res.json({ code: 0, data: { reset: true } });
+    } catch (err) {
+      audit(config.dataDir, { action: 'mysql.root-password.reset', target: server.host, result: 'fail', detail2: err.message });
+      res.status(502).json({ code: 502, message: `重置 root 密码失败: ${err.message}` });
     }
   });
 
@@ -390,13 +436,15 @@ function createDatabaseRouter({ config, pool, store }) {
     if (!validateDbAndTable(req.params.db, null, res)) return;
     const cfg = sshCfgOf(server, res);
     if (cfg === null) return;
-    const cmd = mysqlBatchCmd(server, `SHOW TABLES FROM \`${req.params.db}\``, res);
+    // 走 information_schema 同时取表备注
+    const sql = `SELECT TABLE_NAME, TABLE_COMMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA='${sqlEscape(req.params.db)}' ORDER BY TABLE_NAME`;
+    const cmd = mysqlBatchCmd(server, sql, res);
     if (cmd === null) return;
     try {
       const r = await pool.run(cfg, cmd);
       if (r.code !== 0) throw new Error(r.stderr.slice(0, 200) || `退出码 ${r.code}`);
       const result = parseBatchResult(r.stdout);
-      res.json({ code: 0, data: result.rows.map((row) => row[0]) });
+      res.json({ code: 0, data: result.rows.map((row) => ({ name: row[0], comment: row[1] || '' })) });
     } catch (err) {
       res.status(502).json({ code: 502, message: `获取表列表失败: ${err.message}` });
     }
@@ -408,7 +456,8 @@ function createDatabaseRouter({ config, pool, store }) {
     if (!validateDbAndTable(req.params.db, req.params.table, res)) return;
     const cfg = sshCfgOf(server, res);
     if (cfg === null) return;
-    const cmd = mysqlBatchCmd(server, `DESCRIBE \`${req.params.db}\`.\`${req.params.table}\``, res);
+    // SHOW FULL COLUMNS 比 DESCRIBE 多出 Collation/Privileges/Comment，前端按需展示（含字段注释）
+    const cmd = mysqlBatchCmd(server, `SHOW FULL COLUMNS FROM \`${req.params.db}\`.\`${req.params.table}\``, res);
     if (cmd === null) return;
     try {
       const r = await pool.run(cfg, cmd);

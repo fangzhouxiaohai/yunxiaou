@@ -53,11 +53,11 @@
 
 ### P1 补充（用户新增需求，随 P1 交付）
 9. **数据库管理**：
-   - MySQL/MariaDB：数据库列表（`SHOW DATABASES`）、创建数据库、删除数据库、创建用户并授权（`CREATE USER` + `GRANT`）、导入（上传 .sql 执行）、导出（`mysqldump` 下载）。
+   - MySQL：数据库列表（`SHOW DATABASES`）、创建数据库、删除数据库、创建用户并授权（`CREATE USER` + `GRANT`）、导入（上传 .sql 执行）、导出（`mysqldump` 下载）。
    - Redis：状态信息（`redis-cli INFO`：内存、连接数、命中率）、键列表（`SCAN`，分页）、键数量（`DBSIZE`）、清空当前库（`FLUSHDB`，需二次确认）。
    - 通过 SSH 执行 mysql/redis CLI 实现，不引入数据库直连依赖。
    - MySQL root 密码与 Redis 密码在服务器记录中可选配置（AES-256-GCM 加密存储，独立字段 `mysqlPasswordEnc` / `redisPasswordEnc`）；未配置时 MySQL 尝试 `sudo mysql`（auth_socket），Redis 尝试无密码连接。
-10. **软件商店**：收录 Nginx、MySQL/MariaDB、Redis、Docker、Node.js、Python、Git、Fail2ban 共 8 个软件：
+10. **软件商店**：收录 Nginx、MySQL、Redis、Docker、Node.js、Python、Git、Fail2ban 共 8 个软件：
     - 安装状态检测（`command -v` + 版本命令，如 `nginx -v`、`node -v`）
     - 一键安装（自动识别 apt / yum 包管理器），安装过程流式输出日志
     - 版本查看、卸载（可选，二次确认）

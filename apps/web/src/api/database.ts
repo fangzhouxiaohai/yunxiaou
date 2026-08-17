@@ -43,6 +43,14 @@ export function renameDatabase(serverId: string, name: string, newName: string, 
   return request.post(`/servers/${serverId}/databases/${name}/rename`, { newName, confirm }, { timeout: 120000 })
 }
 
+export function getRootPassword(serverId: string) {
+  return request.get(`/servers/${serverId}/mysql/root-password`) as Promise<{ configured: boolean; password: string | null }>
+}
+
+export function resetRootPassword(serverId: string, newPassword: string, confirm: boolean) {
+  return request.post(`/servers/${serverId}/mysql/root-password/reset`, { newPassword, confirm })
+}
+
 export function getRedisInfo(serverId: string) {
   return request.get(`/servers/${serverId}/redis`) as Promise<RedisInfo>
 }
@@ -62,8 +70,13 @@ export interface BatchResult {
   rows: string[][]
 }
 
+export interface TableInfo {
+  name: string
+  comment: string
+}
+
 export function listTables(serverId: string, db: string) {
-  return request.get(`/servers/${serverId}/databases/${db}/tables`) as Promise<string[]>
+  return request.get(`/servers/${serverId}/databases/${db}/tables`) as Promise<TableInfo[]>
 }
 
 export function tableStructure(serverId: string, db: string, table: string) {

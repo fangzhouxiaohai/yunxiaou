@@ -8,7 +8,7 @@
       <div class="page-actions"></div>
     </div>
     <el-tabs v-model="activeTab">
-    <el-tab-pane label="MySQL/MariaDB" name="mysql">
+    <el-tab-pane label="MySQL" name="mysql">
       <!-- 库列表 -->
       <el-card v-if="dbView === 'list'">
         <el-alert
@@ -21,6 +21,7 @@
         />
         <div v-else class="toolbar">
           <el-button type="primary" @click="dbDialogVisible = true">创建数据库</el-button>
+          <el-button @click="openRootPwd">Root 密码</el-button>
           <span class="hint">点击「进入」查看表与数据</span>
         </div>
         <el-table :data="databases" v-loading="dbLoading">
@@ -35,88 +36,102 @@
         </el-table>
       </el-card>
 
-      <!-- 表列表 -->
-      <el-card v-else-if="dbView === 'tables'">
+      <!-- 表浏览器：左树 + 右侧数据/结构 Tab -->
+      <el-card v-else-if="dbView === 'explorer'">
         <el-page-header class="db-page-header" @back="dbView = 'list'">
-          <template #content>{{ currentDb }} 的表</template>
+          <template #content>{{ currentDb }}</template>
           <template #extra>
             <el-button type="primary" size="small" @click="openCreateTable">创建表</el-button>
             <el-button type="primary" size="small" plain @click="dbView = 'sql'">SQL</el-button>
             <el-button size="small" @click="loadTables">刷新</el-button>
           </template>
         </el-page-header>
-        <el-table :data="tables" v-loading="tablesLoading" class="table-gap">
-          <el-table-column prop="name" label="表名" />
-          <el-table-column label="操作" width="330">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="enterStructure(row.name)">结构</el-button>
-              <el-button link type="success" @click="enterRows(row.name)">数据</el-button>
-              <el-button link type="warning" @click="openRenameTable(row.name)">改名</el-button>
-              <el-button link @click="openTableComment(row.name)">备注</el-button>
-              <el-button link type="danger" @click="onDropTable(row.name)">删除</el-button>
+        <div class="explorer">
+          <div class="explorer-tree">
+            <el-tree
+              :data="tables"
+              node-key="name"
+              :props="{ label: 'name' }"
+              highlight-current
+              v-loading="tablesLoading"
+              @node-click="onSelectTable"
+            >
+              <template #default="{ data }">
+                <div class="tree-node">
+                  <span class="tree-label" :title="data.name">{{ data.name }}</span>
+                  <span v-if="data.comment" class="tree-comment" :title="data.comment">（{{ data.comment }}）</span>
+                  <span class="tree-actions">
+                    <el-icon title="改名" @click.stop="openRenameTable(data.name)"><EditPen /></el-icon>
+                    <el-icon title="备注" @click.stop="openTableComment(data.name)"><Memo /></el-icon>
+                    <el-icon title="删除" class="danger" @click.stop="onDropTable(data.name)"><Delete /></el-icon>
+                  </span>
+                </div>
+              </template>
+            </el-tree>
+          </div>
+          <div class="explorer-main">
+            <template v-if="currentTable">
+              <div class="explorer-table-name">
+                {{ currentTable }}
+                <span v-if="currentTableComment" class="table-comment">（{{ currentTableComment }}）</span>
+              </div>
+              <el-tabs v-model="tableTab">
+                <el-tab-pane label="数据" name="data">
+                  <div class="toolbar">
+                    <el-button type="primary" size="small" @click="openRowDialog('add')">新增行</el-button>
+                    <el-button size="small" @click="loadRows">刷新</el-button>
+                    <span class="hint">共 {{ rowsTotal }} 行</span>
+                  </div>
+                  <el-table :data="rowObjects" v-loading="panelLoading" border size="small" max-height="460">
+                    <el-table-column
+                      v-for="col in rowsColumns"
+                      :key="col"
+                      :prop="col"
+                      :label="col"
+                      min-width="120"
+                      show-overflow-tooltip
+                    />
+                    <el-table-column label="操作" width="130" fixed="right">
+                      <template #default="{ row }">
+                        <el-button link type="primary" @click="openRowDialog('edit', row)">编辑</el-button>
+                        <el-button link type="danger" @click="onDeleteRow(row)">删除</el-button>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                  <el-pagination
+                    class="table-gap"
+                    layout="total, prev, pager, next"
+                    :total="rowsTotal"
+                    :page-size="10"
+                    :current-page="rowsPage"
+                    @current-change="(p: number) => { rowsPage = p; loadRows() }"
+                  />
+                </el-tab-pane>
+                <el-tab-pane label="结构" name="structure" lazy>
+                  <div class="toolbar">
+                    <el-button type="primary" size="small" @click="openFieldDialog('add')">添加字段</el-button>
+                    <el-button size="small" @click="loadStructure">刷新</el-button>
+                  </div>
+                  <el-table :data="structureRows" v-loading="panelLoading" border size="small" max-height="460">
+                    <el-table-column v-for="col in structureDisplayColumns" :key="col.key" :prop="col.key" :label="col.label" min-width="110" />
+                    <el-table-column label="操作" width="140" fixed="right">
+                      <template #default="{ row }">
+                        <el-button link type="primary" @click="openFieldDialog('edit', row)">修改</el-button>
+                        <el-button link type="danger" @click="onDropColumn(row)">删除</el-button>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                </el-tab-pane>
+              </el-tabs>
             </template>
-          </el-table-column>
-        </el-table>
-      </el-card>
-
-      <!-- 表结构 -->
-      <el-card v-else-if="dbView === 'structure'">
-        <el-page-header class="db-page-header" @back="dbView = 'tables'">
-          <template #content>{{ currentDb }}.{{ currentTable }} 结构</template>
-          <template #extra>
-            <el-button type="primary" size="small" @click="openFieldDialog('add')">添加字段</el-button>
-            <el-button size="small" @click="enterStructure(currentTable)">刷新</el-button>
-          </template>
-        </el-page-header>
-        <el-table :data="structureRows" v-loading="panelLoading" class="table-gap" border size="small">
-          <el-table-column v-for="col in structure.columns" :key="col" :prop="col" :label="col" min-width="110" />
-          <el-table-column label="操作" width="140" fixed="right">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openFieldDialog('edit', row)">修改</el-button>
-              <el-button link type="danger" @click="onDropColumn(row)">删除</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-card>
-
-      <!-- 数据浏览 -->
-      <el-card v-else-if="dbView === 'rows'">
-        <el-page-header class="db-page-header" @back="dbView = 'tables'">
-          <template #content>{{ currentDb }}.{{ currentTable }} 数据（共 {{ rowsTotal }} 行）</template>
-          <template #extra>
-            <el-button type="primary" size="small" @click="openRowDialog('add')">新增行</el-button>
-            <el-button size="small" @click="loadRows">刷新</el-button>
-          </template>
-        </el-page-header>
-        <el-table :data="rowObjects" v-loading="panelLoading" class="table-gap" border size="small" max-height="480">
-          <el-table-column
-            v-for="col in rowsColumns"
-            :key="col"
-            :prop="col"
-            :label="col"
-            min-width="120"
-            show-overflow-tooltip
-          />
-          <el-table-column label="操作" width="130" fixed="right">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openRowDialog('edit', row)">编辑</el-button>
-              <el-button link type="danger" @click="onDeleteRow(row)">删除</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-        <el-pagination
-          class="table-gap"
-          layout="total, prev, pager, next"
-          :total="rowsTotal"
-          :page-size="10"
-          :current-page="rowsPage"
-          @current-change="(p: number) => { rowsPage = p; loadRows() }"
-        />
+            <el-empty v-else description="点击左侧表名查看数据与结构" />
+          </div>
+        </div>
       </el-card>
 
       <!-- SQL 执行 -->
       <el-card v-else-if="dbView === 'sql'">
-        <el-page-header class="db-page-header" @back="dbView = 'tables'">
+        <el-page-header class="db-page-header" @back="dbView = 'explorer'">
           <template #content>在 {{ currentDb }} 中执行 SQL</template>
         </el-page-header>
         <el-input
@@ -351,6 +366,15 @@
     </template>
   </el-dialog>
 
+  <!-- 库改名迁移进度 -->
+  <el-dialog v-model="renameProgressVisible" title="正在迁移数据库" width="min(460px, 92vw)" :close-on-click-modal="false" :show-close="false">
+    <div class="rename-progress">
+      <el-progress :percentage="Math.floor(renamePercent)" :stroke-width="14" striped striped-flow />
+      <div class="rename-stage">{{ renameStage }}</div>
+      <div class="hint">迁移期间请勿关闭页面，大库可能需要数分钟</div>
+    </div>
+  </el-dialog>
+
   <!-- 修改表名 -->
   <el-dialog v-model="renameTableVisible" :title="`修改表名 ${renameTableOld}`" width="min(480px, 94vw)">
     <el-form label-width="90px">
@@ -372,26 +396,55 @@
       <el-button type="primary" :loading="commentSaving" @click="onSaveComment">保存</el-button>
     </template>
   </el-dialog>
+
+  <!-- Root 密码 -->
+  <el-dialog v-model="rootPwdVisible" title="MySQL Root 密码" width="min(520px, 94vw)">
+    <el-form label-width="110px">
+      <el-form-item label="当前密码">
+        <el-input v-model="rootPwdCurrent" type="password" show-password readonly
+          :placeholder="rootPwdConfigured ? '' : '未配置（面板通过 sudo/auth_socket 免密连接）'" />
+      </el-form-item>
+      <el-form-item label="新密码">
+        <div class="root-pwd-row">
+          <el-input v-model="rootPwdNew" placeholder="8-64 位，不含引号/反斜杠" show-password type="password" />
+          <el-button @click="genRandomPwd">随机生成</el-button>
+        </div>
+      </el-form-item>
+    </el-form>
+    <el-alert type="warning" show-icon :closable="false"
+      title="重置后立即生效，面板会同步更新保存的凭据；请自行记录新密码，使用旧密码的其他程序将连接失败" />
+    <template #footer>
+      <el-button @click="rootPwdVisible = false">关闭</el-button>
+      <el-button type="danger" :loading="rootPwdSaving" @click="onResetRootPwd">重置密码</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { ElLoading, ElMessage, ElMessageBox } from 'element-plus'
+import { Delete, EditPen, Memo } from '@element-plus/icons-vue'
 import {
   createDatabase, dropDatabase, execSql, flushRedis, getRedisInfo, listDatabases, listRedisKeys,
   listTables, tableRows, tableStructure, createTable, dropTable, addColumn, modifyColumn, dropColumn,
   insertRow, updateRow, deleteRow, renameDatabase, renameTable, getTableComment, setTableComment,
-  type BatchResult, type RedisInfo, type ColumnDef,
+  getRootPassword, resetRootPassword,
+  type BatchResult, type RedisInfo, type ColumnDef, type TableInfo,
 } from '@/api/database'
 import { useServerStore } from '@/stores/server'
 
 const serverStore = useServerStore()
 const activeTab = ref('mysql')
 
+// 耗时操作的统一全屏加载圈，避免界面看似无反应
+function fullLoading(text: string) {
+  return ElLoading.service({ fullscreen: true, text, background: 'rgba(0, 0, 0, 0.35)' })
+}
+
 const COLUMN_TYPES = ['int', 'bigint', 'smallint', 'tinyint', 'varchar', 'char', 'text', 'mediumtext', 'longtext', 'decimal', 'float', 'double', 'datetime', 'date', 'time', 'timestamp', 'json']
 
 // ===== MySQL 面板 =====
-type DbView = 'list' | 'tables' | 'structure' | 'rows' | 'sql'
+type DbView = 'list' | 'explorer' | 'sql'
 const dbView = ref<DbView>('list')
 const databases = ref<Array<{ name: string }>>([])
 const dbLoading = ref(false)
@@ -403,7 +456,7 @@ const mysqlMessage = ref('')
 
 const currentDb = ref('')
 const currentTable = ref('')
-const tables = ref<Array<{ name: string }>>([])
+const tables = ref<TableInfo[]>([])
 const tablesLoading = ref(false)
 const structure = ref<BatchResult>({ columns: [], rows: [] })
 const structureRows = ref<Record<string, string>[]>([])
@@ -441,45 +494,61 @@ async function loadDatabases() {
 
 function enterDb(db: string) {
   currentDb.value = db
-  dbView.value = 'tables'
+  currentTable.value = ''
+  tableTab.value = 'data'
+  dbView.value = 'explorer'
   loadTables()
 }
 
-async function loadTables() {
-  if (!serverStore.currentId) return
-  tablesLoading.value = true
-  try {
-    const names = await listTables(serverStore.currentId, currentDb.value)
-    tables.value = names.map((name) => ({ name }))
-  } finally {
-    tablesLoading.value = false
-  }
+// ===== 表浏览器（左树 + 右侧 Tab）=====
+const tableTab = ref<'data' | 'structure'>('data')
+const currentTableComment = computed(() => tables.value.find((t) => t.name === currentTable.value)?.comment || '')
+
+// 结构 Tab 展示列：英文键 → 中文表头（SHOW FULL COLUMNS 输出，只挑这几列）
+const STRUCTURE_COLUMNS: Array<{ key: string; label: string }> = [
+  { key: 'Field', label: '字段' },
+  { key: 'Type', label: '类型' },
+  { key: 'Null', label: '允许NULL' },
+  { key: 'Key', label: '键' },
+  { key: 'Default', label: '默认值' },
+  { key: 'Extra', label: '额外' },
+  { key: 'Comment', label: '注释' },
+]
+const structureDisplayColumns = computed(() => STRUCTURE_COLUMNS.filter((c) => structure.value.columns.includes(c.key)))
+
+async function onSelectTable(data: { name: string }) {
+  if (currentTable.value === data.name) return
+  currentTable.value = data.name
+  rowsPage.value = 1
+  tableTab.value = 'data'
+  // 行编辑需要字段列表，提前加载结构
+  loadStructure()
+  await loadRows()
 }
 
-async function enterStructure(table: string) {
-  currentTable.value = table
-  dbView.value = 'structure'
+async function loadStructure() {
+  if (!serverStore.currentId || !currentTable.value) return
   panelLoading.value = true
   try {
-    structure.value = await tableStructure(serverStore.currentId!, currentDb.value, table)
+    structure.value = await tableStructure(serverStore.currentId, currentDb.value, currentTable.value)
     structureRows.value = zip(structure.value.columns, structure.value.rows)
   } finally {
     panelLoading.value = false
   }
 }
 
-async function enterRows(table: string) {
-  currentTable.value = table
-  rowsPage.value = 1
-  dbView.value = 'rows'
-  // 行编辑需要字段列表
-  if (structureRows.value.length === 0 || structure.value.columns.length === 0) {
-    try {
-      structure.value = await tableStructure(serverStore.currentId!, currentDb.value, table)
-      structureRows.value = zip(structure.value.columns, structure.value.rows)
-    } catch { /* 结构加载失败不阻塞数据浏览 */ }
+watch(tableTab, (tab) => {
+  if (tab === 'structure' && currentTable.value) loadStructure()
+})
+
+async function loadTables() {
+  if (!serverStore.currentId) return
+  tablesLoading.value = true
+  try {
+    tables.value = await listTables(serverStore.currentId, currentDb.value)
+  } finally {
+    tablesLoading.value = false
   }
-  await loadRows()
 }
 
 async function loadRows() {
@@ -575,9 +644,15 @@ async function onCreateTable() {
 
 async function onDropTable(name: string) {
   await ElMessageBox.confirm(`将删除表「${name}」，该操作不可恢复。`, '删除表', { type: 'warning' })
-  await dropTable(serverStore.currentId!, currentDb.value, name, true)
-  ElMessage.success('已删除')
-  loadTables()
+  const loading = fullLoading('正在删除表...')
+  try {
+    await dropTable(serverStore.currentId!, currentDb.value, name, true)
+    ElMessage.success('已删除')
+    if (currentTable.value === name) currentTable.value = ''
+    loadTables()
+  } finally {
+    loading.close()
+  }
 }
 
 // ===== 字段管理 =====
@@ -611,7 +686,7 @@ function openFieldDialog(mode: 'add' | 'edit', row?: Record<string, string>) {
     fieldForm.length = length
     fieldForm.nullable = row.Null === 'YES'
     fieldForm.defaultValue = row.Default === 'NULL' ? '' : (row.Default || '')
-    fieldForm.comment = ''
+    fieldForm.comment = row.Comment || ''
     fieldForm.after = ''
   } else {
     fieldForm.oldName = ''
@@ -648,7 +723,7 @@ async function onSaveField() {
     }
     ElMessage.success('已保存')
     fieldDialogVisible.value = false
-    enterStructure(currentTable.value)
+    loadStructure()
   } finally {
     fieldSaving.value = false
   }
@@ -656,9 +731,14 @@ async function onSaveField() {
 
 async function onDropColumn(row: Record<string, string>) {
   await ElMessageBox.confirm(`将删除字段「${row.Field}」，该操作不可恢复。`, '删除字段', { type: 'warning' })
-  await dropColumn(serverStore.currentId!, currentDb.value, currentTable.value, row.Field, true)
-  ElMessage.success('已删除')
-  enterStructure(currentTable.value)
+  const loading = fullLoading('正在删除字段...')
+  try {
+    await dropColumn(serverStore.currentId!, currentDb.value, currentTable.value, row.Field, true)
+    ElMessage.success('已删除')
+    loadStructure()
+  } finally {
+    loading.close()
+  }
 }
 
 // ===== 行编辑 =====
@@ -701,9 +781,60 @@ async function onSaveRow() {
 
 async function onDeleteRow(row: Record<string, string>) {
   await ElMessageBox.confirm('将删除该行数据，不可恢复。', '删除行', { type: 'warning' })
-  await deleteRow(serverStore.currentId!, currentDb.value, currentTable.value, { ...row }, true)
-  ElMessage.success('已删除')
-  loadRows()
+  const loading = fullLoading('正在删除行...')
+  try {
+    await deleteRow(serverStore.currentId!, currentDb.value, currentTable.value, { ...row }, true)
+    ElMessage.success('已删除')
+    loadRows()
+  } finally {
+    loading.close()
+  }
+}
+
+// ===== Root 密码 =====
+const rootPwdVisible = ref(false)
+const rootPwdSaving = ref(false)
+const rootPwdConfigured = ref(false)
+const rootPwdCurrent = ref('')
+const rootPwdNew = ref('')
+
+async function openRootPwd() {
+  rootPwdNew.value = ''
+  rootPwdCurrent.value = ''
+  rootPwdConfigured.value = false
+  rootPwdVisible.value = true
+  try {
+    const res = await getRootPassword(serverStore.currentId!)
+    rootPwdConfigured.value = res.configured
+    rootPwdCurrent.value = res.password || ''
+  } catch { /* 读取失败仍可执行重置 */ }
+}
+
+// 15 位大小写字母+数字随机密码（crypto 安全随机）
+function genRandomPwd() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+  const buf = new Uint32Array(15)
+  crypto.getRandomValues(buf)
+  rootPwdNew.value = [...buf].map((n) => chars[n % chars.length]).join('')
+}
+
+async function onResetRootPwd() {
+  const pwd = rootPwdNew.value.trim()
+  if (pwd.length < 8 || pwd.length > 64) {
+    ElMessage.warning('密码长度需在 8-64 位之间')
+    return
+  }
+  await ElMessageBox.confirm(`确定将 root 密码重置为：\n${pwd}\n\n重置后旧密码立即失效。`, '重置 Root 密码', { type: 'warning', confirmButtonText: '确认重置' })
+  rootPwdSaving.value = true
+  try {
+    await resetRootPassword(serverStore.currentId!, pwd, true)
+    rootPwdCurrent.value = pwd
+    rootPwdConfigured.value = true
+    rootPwdNew.value = ''
+    ElMessage.success('已重置，面板凭据已同步更新')
+  } finally {
+    rootPwdSaving.value = false
+  }
 }
 
 // ===== Redis =====
@@ -769,9 +900,14 @@ async function onDropDb(name: string) {
   await ElMessageBox.confirm(
     `将备份后删除数据库「${name}」，该操作不可恢复。`, '删除数据库', { type: 'warning' }
   )
-  await dropDatabase(serverStore.currentId!, name, true)
-  ElMessage.success('已删除（备份在服务器 /tmp/linuxmgr-db-backup/）')
-  loadDatabases()
+  const loading = fullLoading('正在备份并删除数据库，大库可能需要数分钟...')
+  try {
+    await dropDatabase(serverStore.currentId!, name, true)
+    ElMessage.success('已删除（备份在服务器 /tmp/linuxmgr-db-backup/）')
+    loadDatabases()
+  } finally {
+    loading.close()
+  }
 }
 
 // ===== 修改库名 / 表名 / 表备注 =====
@@ -779,6 +915,38 @@ const renameDbVisible = ref(false)
 const renameDbSaving = ref(false)
 const renameDbOld = ref('')
 const renameDbName = ref('')
+
+// 迁移进度弹窗：后端是单次请求，前端按阶段模拟推进，避免界面看似卡死
+const renameProgressVisible = ref(false)
+const renamePercent = ref(0)
+const renameStage = ref('')
+const RENAME_STAGES = ['读取旧库表结构', '创建新数据库', '迁移全部表', '删除旧库', '完成']
+let renameTimer: ReturnType<typeof setInterval> | undefined
+
+function startRenameProgress() {
+  renamePercent.value = 0
+  renameStage.value = RENAME_STAGES[0]
+  renameProgressVisible.value = true
+  const caps = [15, 30, 85, 92]
+  renameTimer = setInterval(() => {
+    const p = renamePercent.value
+    const stageIdx = p < 15 ? 0 : p < 30 ? 1 : p < 85 ? 2 : 3
+    renameStage.value = RENAME_STAGES[stageIdx]
+    if (p < caps[stageIdx]) renamePercent.value = Math.min(caps[stageIdx], p + Math.random() * 2)
+  }, 200)
+}
+
+function finishRenameProgress(ok: boolean) {
+  if (renameTimer) clearInterval(renameTimer)
+  renameTimer = undefined
+  if (ok) {
+    renamePercent.value = 100
+    renameStage.value = RENAME_STAGES[4]
+    setTimeout(() => { renameProgressVisible.value = false }, 600)
+  } else {
+    renameProgressVisible.value = false
+  }
+}
 
 function openRenameDb(name: string) {
   renameDbOld.value = name
@@ -792,14 +960,16 @@ async function onRenameDb() {
     ElMessage.warning('请填写新库名')
     return
   }
-  renameDbSaving.value = true
+  renameDbVisible.value = false
+  startRenameProgress()
   try {
     const res = await renameDatabase(serverStore.currentId!, renameDbOld.value, newName, true) as unknown as { renamed: string; tables: number }
+    finishRenameProgress(true)
     ElMessage.success(`已改名为 ${res.renamed}（迁移 ${res.tables} 张表）`)
-    renameDbVisible.value = false
     loadDatabases()
-  } finally {
-    renameDbSaving.value = false
+  } catch (err) {
+    finishRenameProgress(false)
+    throw err
   }
 }
 
@@ -850,6 +1020,8 @@ async function onSaveComment() {
   commentSaving.value = true
   try {
     await setTableComment(serverStore.currentId!, currentDb.value, commentTable.value, commentText.value)
+    const row = tables.value.find((t) => t.name === commentTable.value)
+    if (row) row.comment = commentText.value
     ElMessage.success('已保存')
     commentVisible.value = false
   } finally {
@@ -859,9 +1031,14 @@ async function onSaveComment() {
 
 async function onFlushRedis() {
   await ElMessageBox.confirm('将清空当前 Redis 库的所有键，不可恢复。', '清空 Redis', { type: 'warning' })
-  await flushRedis(serverStore.currentId!, true)
-  ElMessage.success('已清空')
-  loadRedis()
+  const loading = fullLoading('正在清空 Redis...')
+  try {
+    await flushRedis(serverStore.currentId!, true)
+    ElMessage.success('已清空')
+    loadRedis()
+  } finally {
+    loading.close()
+  }
 }
 </script>
 
@@ -880,4 +1057,43 @@ async function onFlushRedis() {
 .row-form { max-height: 60vh; overflow-y: auto; }
 .row-field { display: flex; align-items: center; gap: 12px; width: 100%; }
 .null-check { flex-shrink: 0; }
+.explorer { display: flex; gap: 16px; align-items: stretch; }
+.explorer-tree {
+  width: 240px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border-color, #e4e7ed);
+  padding-right: 8px;
+  max-height: 560px;
+  overflow-y: auto;
+}
+.explorer-main { flex: 1; min-width: 0; }
+.explorer-table-name { font-size: 15px; font-weight: 600; margin-bottom: 4px; color: var(--text-1, #303133); }
+.table-comment { font-size: 13px; font-weight: 400; color: var(--text-3, #909399); }
+.tree-node {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding-right: 4px;
+  .tree-label { flex-shrink: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tree-comment { flex: 1; min-width: 0; font-size: 12px; color: var(--text-3, #909399); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tree-actions {
+    display: none;
+    gap: 6px;
+    flex-shrink: 0;
+    .el-icon { color: #909399; &:hover { color: var(--el-color-primary); } }
+    .el-icon.danger:hover { color: var(--el-color-danger); }
+  }
+  &:hover .tree-actions { display: inline-flex; }
+}
+.root-pwd-row { display: flex; gap: 8px; width: 100%; }
+.rename-progress {
+  text-align: center;
+  .rename-stage { margin-top: 14px; font-size: 14px; font-weight: 600; color: var(--text-1, #303133); }
+  .hint { margin-top: 8px; }
+}
+@media (max-width: 767px) {
+  .explorer { flex-direction: column; }
+  .explorer-tree { width: 100%; border-right: none; border-bottom: 1px solid var(--border-color, #e4e7ed); max-height: 240px; padding-right: 0; }
+}
 </style>

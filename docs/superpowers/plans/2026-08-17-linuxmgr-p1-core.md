@@ -3252,7 +3252,7 @@ const { audit } = require('../utils/audit');
 // 软件清单：name 同时是包名与命令名（统一白名单，杜绝任意命令注入）
 const SOFTWARE = [
   { name: 'nginx', display: 'Nginx', desc: 'Web 服务器/反向代理', versionCmd: 'nginx -v 2>&1', pkg: { apt: 'nginx', yum: 'nginx' } },
-  { name: 'mysql', display: 'MySQL/MariaDB', desc: '关系型数据库', versionCmd: 'mysql --version', pkg: { apt: 'mysql-server', yum: 'mysql-server' } },
+  { name: 'mysql', display: 'MySQL', desc: '关系型数据库', versionCmd: 'mysql --version', pkg: { apt: 'mysql-server', yum: 'mysql-server' } },
   { name: 'redis', display: 'Redis', desc: '内存键值数据库', versionCmd: 'redis-server --version', pkg: { apt: 'redis-server', yum: 'redis' } },
   { name: 'docker', display: 'Docker', desc: '容器引擎', versionCmd: 'docker --version', pkg: { apt: 'docker.io', yum: 'docker-ce' } },
   { name: 'node', display: 'Node.js', desc: 'JavaScript 运行时', versionCmd: 'node -v', pkg: { apt: 'nodejs', yum: 'nodejs' } },
@@ -3419,7 +3419,7 @@ export function flushRedis(serverId: string, confirm: boolean) {
     <el-empty description="请先在「服务器管理」中添加并选择服务器" />
   </div>
   <el-tabs v-else v-model="activeTab">
-    <el-tab-pane label="MySQL/MariaDB" name="mysql">
+    <el-tab-pane label="MySQL" name="mysql">
       <el-card>
         <div class="toolbar">
           <el-button type="primary" @click="dbDialogVisible = true">创建数据库</el-button>

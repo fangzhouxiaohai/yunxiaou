@@ -5,7 +5,7 @@ const { audit } = require('../utils/audit');
 // 普通软件（apt/yum 直接安装）
 const PLAIN_SOFTWARE = [
   { name: 'nginx', display: 'Nginx', desc: 'Web 服务器/反向代理', versionCmd: 'nginx -v 2>&1', pkg: { apt: 'nginx', yum: 'nginx' } },
-  { name: 'mysql', display: 'MySQL/MariaDB', desc: '关系型数据库（多版本管理见数据库页）', versionCmd: 'mysql --version', pkg: { apt: 'mysql-server', yum: 'mysql-server' } },
+  { name: 'mysql', display: 'MySQL', desc: '关系型数据库（多版本管理见数据库页）', versionCmd: 'mysql --version', pkg: { apt: 'mysql-server', yum: 'mysql-server' } },
   { name: 'redis', display: 'Redis', desc: '内存键值数据库', versionCmd: 'redis-server --version', pkg: { apt: 'redis-server', yum: 'redis' } },
   { name: 'docker', display: 'Docker', desc: '容器引擎', versionCmd: 'docker --version', pkg: { apt: 'docker.io', yum: 'docker-ce' } },
   { name: 'node', display: 'Node.js', desc: 'JavaScript 运行时', versionCmd: 'node -v', pkg: { apt: 'nodejs', yum: 'nodejs' } },

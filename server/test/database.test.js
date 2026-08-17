@@ -194,35 +194,37 @@ test('切换默认 MySQL 实例（停其他启目标）', async () => {
 // ===== 数据库面板=====
 
 const BATCH_TABLES = 'Tables_in_app_blog\nposts\nusers\n';
-const BATCH_DESCRIBE = 'Field\tType\tNull\tKey\tDefault\tExtra\nid\tint\tNO\tPRI\tNULL\t\nname\tvarchar(255)\tYES\t\tNULL\t\n';
+const BATCH_DESCRIBE = 'Field\tType\tCollation\tNull\tKey\tDefault\tExtra\tPrivileges\tComment\nid\tint\tNULL\tNO\tPRI\tNULL\t\tselect,insert,update,references\t主键\nname\tvarchar(255)\tutf8mb4_general_ci\tYES\t\tNULL\t\tselect,insert,update,references\t\n';
 const BATCH_SELECT = 'id\tname\n1\thello\n2\tworld\n';
 
-test('表列表', async () => {
-  const { app } = setup({
-    'sudo mysql -B -e "SHOW TABLES FROM \\`app_blog\\`"': () => ({ code: 0, stdout: BATCH_TABLES, stderr: '' }),
-    default: () => ({ code: 0, stdout: '', stderr: '' }),
+test('表列表（含备注）', async () => {
+  const { app, calls } = setup({
+    default: () => ({ code: 0, stdout: 'TABLE_NAME\tTABLE_COMMENT\nposts\t文章表\nusers\t\n', stderr: '' }),
   });
   const res = await request(app).get('/api/servers/srv1/databases/app_blog/tables').set(await auth(app));
   assert.equal(res.status, 200);
-  assert.ok(res.body.data.includes('posts'));
-  assert.ok(res.body.data.includes('users'));
+  assert.deepEqual(res.body.data, [
+    { name: 'posts', comment: '文章表' },
+    { name: 'users', comment: '' },
+  ]);
+  assert.ok(calls.some((c) => c.includes('information_schema.TABLES')));
 });
 
 test('表结构', async () => {
   const { app } = setup({
-    'sudo mysql -B -e "DESCRIBE \\`app_blog\\`.\\`posts\\`"': () => ({ code: 0, stdout: BATCH_DESCRIBE, stderr: '' }),
+    'sudo mysql --default-character-set=utf8mb4 -B -e "SHOW FULL COLUMNS FROM \\`app_blog\\`.\\`posts\\`"': () => ({ code: 0, stdout: BATCH_DESCRIBE, stderr: '' }),
     default: () => ({ code: 0, stdout: '', stderr: '' }),
   });
   const res = await request(app).get('/api/servers/srv1/databases/app_blog/tables/posts/structure').set(await auth(app));
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body.data.columns, ['Field', 'Type', 'Null', 'Key', 'Default', 'Extra']);
+  assert.deepEqual(res.body.data.columns, ['Field', 'Type', 'Collation', 'Null', 'Key', 'Default', 'Extra', 'Privileges', 'Comment']);
   assert.equal(res.body.data.rows[0][0], 'id');
 });
 
 test('数据浏览分页', async () => {
   const { app, calls } = setup({
-    'sudo mysql -B -e "SELECT * FROM \\`app_blog\\`.\\`posts\\` LIMIT 10 OFFSET 10"': () => ({ code: 0, stdout: BATCH_SELECT, stderr: '' }),
-    'sudo mysql -N -e "SELECT COUNT(*) FROM \\`app_blog\\`.\\`posts\\`"': () => ({ code: 0, stdout: '42\n', stderr: '' }),
+    'sudo mysql --default-character-set=utf8mb4 -B -e "SELECT * FROM \\`app_blog\\`.\\`posts\\` LIMIT 10 OFFSET 10"': () => ({ code: 0, stdout: BATCH_SELECT, stderr: '' }),
+    'sudo mysql --default-character-set=utf8mb4 -N -e "SELECT COUNT(*) FROM \\`app_blog\\`.\\`posts\\`"': () => ({ code: 0, stdout: '42\n', stderr: '' }),
     default: () => ({ code: 0, stdout: '', stderr: '' }),
   });
   const res = await request(app).get('/api/servers/srv1/databases/app_blog/tables/posts/rows?page=2&limit=10').set(await auth(app));
@@ -234,7 +236,7 @@ test('数据浏览分页', async () => {
 
 test('执行只读 SQL', async () => {
   const { app } = setup({
-    'sudo mysql -B -e "USE \\`app_blog\\`; SELECT * FROM posts LIMIT 5"': () => ({ code: 0, stdout: BATCH_SELECT, stderr: '' }),
+    'sudo mysql --default-character-set=utf8mb4 -B -e "USE \\`app_blog\\`; SELECT * FROM posts LIMIT 5"': () => ({ code: 0, stdout: BATCH_SELECT, stderr: '' }),
     default: () => ({ code: 0, stdout: '', stderr: '' }),
   });
   const res = await request(app).post('/api/servers/srv1/sql').set(await auth(app))
@@ -259,7 +261,7 @@ test('危险 SQL 无 WHERE 的 DELETE 即使确认也拒绝', async () => {
 
 test('危险 SQL DROP TABLE 需确认', async () => {
   const { app, calls } = setup({
-    'sudo mysql -B -e "DROP TABLE \\`app_blog\\`.\\`old_posts\\`"': () => ({ code: 0, stdout: '', stderr: '' }),
+    'sudo mysql --default-character-set=utf8mb4 -B -e "DROP TABLE \\`app_blog\\`.\\`old_posts\\`"': () => ({ code: 0, stdout: '', stderr: '' }),
     default: () => ({ code: 0, stdout: '', stderr: '' }),
   });
   const res = await request(app).post('/api/servers/srv1/sql').set(await auth(app))
@@ -382,7 +384,7 @@ test('修改库名：建库、迁移表、删旧库', async () => {
   const scripted = {
     default: () => ({ code: 0, stdout: '', stderr: '' }),
   };
-  scripted['sudo mysql -B -e "SHOW TABLES FROM \\`app_blog\\`"'] = () => ({ code: 0, stdout: 'Tables_in_app_blog\nposts\nusers\n', stderr: '' });
+  scripted['sudo mysql --default-character-set=utf8mb4 -B -e "SHOW TABLES FROM \\`app_blog\\`"'] = () => ({ code: 0, stdout: 'Tables_in_app_blog\nposts\nusers\n', stderr: '' });
   const { app, calls } = setup(scripted);
   const res = await request(app).post('/api/servers/srv1/databases/app_blog/rename').set(await auth(app))
     .send({ newName: 'app_blog2', confirm: true });
@@ -431,4 +433,49 @@ test('读取表备注走 information_schema', async () => {
   assert.equal(res.status, 200);
   assert.equal(res.body.data.comment, '文章表');
   assert.ok(calls.some((c) => c.includes('information_schema.TABLES')));
+});
+
+test('查看 root 密码：未配置返回 configured=false', async () => {
+  const { app } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).get('/api/servers/srv1/mysql/root-password').set(await auth(app));
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.configured, false);
+  assert.equal(res.body.data.password, null);
+});
+
+test('查看 root 密码：已配置时解密返回', async () => {
+  const { app, stores } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const list = stores.servers.read();
+  list[0].mysqlPasswordEnc = encrypt('RootPass@2024', 'k');
+  stores.servers.write(list);
+  const res = await request(app).get('/api/servers/srv1/mysql/root-password').set(await auth(app));
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.configured, true);
+  assert.equal(res.body.data.password, 'RootPass@2024');
+});
+
+test('重置 root 密码：执行 ALTER USER 并更新凭据存储', async () => {
+  const { app, calls, stores } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/mysql/root-password/reset').set(await auth(app))
+    .send({ newPassword: 'NewRootPass123', confirm: true });
+  assert.equal(res.status, 200, res.body.message);
+  assert.ok(calls.some((c) => c.includes("ALTER USER 'root'@'localhost' IDENTIFIED BY 'NewRootPass123'")));
+  const { decrypt: dec } = require('../src/crypto/cipher');
+  const saved = stores.servers.read()[0];
+  assert.equal(dec(saved.mysqlPasswordEnc, 'k'), 'NewRootPass123');
+});
+
+test('重置 root 密码：需确认、长度与字符校验', async () => {
+  const { app, calls } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const a = await auth(app);
+  let res = await request(app).post('/api/servers/srv1/mysql/root-password/reset').set(a)
+    .send({ newPassword: 'NewRootPass123' });
+  assert.equal(res.status, 400);
+  res = await request(app).post('/api/servers/srv1/mysql/root-password/reset').set(a)
+    .send({ newPassword: 'short', confirm: true });
+  assert.equal(res.status, 400);
+  res = await request(app).post('/api/servers/srv1/mysql/root-password/reset').set(a)
+    .send({ newPassword: "has'quote123", confirm: true });
+  assert.equal(res.status, 400);
+  assert.ok(!calls.some((c) => c.includes('ALTER USER')));
 });
