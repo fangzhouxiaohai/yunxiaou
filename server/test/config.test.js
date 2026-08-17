@@ -25,7 +25,7 @@ test('loadConfig 缺失时使用开发默认值并给出警告', () => {
   assert.equal(config.jwtSecret, 'dev-jwt-secret');
   assert.equal(config.masterKey, 'dev-master-key');
   assert.equal(config.adminUser, 'admin');
-  assert.equal(config.adminPassword, 'admin123');
+  assert.equal(config.adminPassword, '123456');
   assert.ok(warnings.some((w) => w.includes('JWT_SECRET')));
   assert.ok(warnings.some((w) => w.includes('MASTER_KEY')));
   assert.ok(warnings.some((w) => w.includes('ADMIN_PASSWORD')));

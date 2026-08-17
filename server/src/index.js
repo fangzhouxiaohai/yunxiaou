@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const express = require('express');
 const { loadConfig } = require('./config');
 const { requireAuth } = require('./auth/middleware');
+const { createCredentials } = require('./auth/credentials');
 const { JsonStore } = require('./store/jsonStore');
 const { ConnectionPool } = require('./ssh/connectionPool');
 const createAuthRouter = require('./routes/auth');
@@ -24,7 +25,12 @@ function createApp({ config, pool, stores }) {
   const app = express();
   app.use(express.json());
 
-  app.use('/api/auth', createAuthRouter({ config }));
+  const credentials = createCredentials({
+    dataDir: config.dataDir,
+    envUser: config.adminUser,
+    envPassword: config.adminPassword,
+  });
+  app.use('/api/auth', createAuthRouter({ config, credentials }));
   app.use('/api', requireAuth(config), createMonitorRouter({ config, pool, store: stores.servers }));
   app.use('/api', requireAuth(config), createDatabaseRouter({ config, pool, store: stores.servers }));
   app.use('/api', requireAuth(config), createStoreRouter({ config, pool, store: stores.servers }));

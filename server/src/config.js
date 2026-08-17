@@ -20,8 +20,8 @@ function loadConfig(env = process.env) {
     warnings.push('MASTER_KEY 未设置，使用开发默认值 dev-master-key（生产必须设置）');
   }
   if (!config.adminPassword) {
-    config.adminPassword = 'admin123';
-    warnings.push('ADMIN_PASSWORD 未设置，使用开发默认值 admin123');
+    config.adminPassword = '123456';
+    warnings.push('ADMIN_PASSWORD 未设置，使用默认值 123456（生产环境必须修改）');
   }
   return { config, warnings };
 }
