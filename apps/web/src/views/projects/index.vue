@@ -11,9 +11,9 @@
       </div>
     </div>
     <el-card>
-      <div class="hint">PHP 项目走 Nginx+php-fpm；Node/Python/Java 项目走 systemd 服务（linuxmgr- 前缀）</div>
+      <div class="hint">PHP 网站走 Nginx+php-fpm；Node/Python/Java 网站走 systemd 服务（linuxmgr- 前缀）</div>
       <el-table :data="projects" v-loading="loading">
-        <el-table-column prop="name" label="项目名" min-width="180" />
+        <el-table-column prop="name" label="网站名" min-width="180" />
         <el-table-column label="类型" width="100">
           <template #default="{ row }">
             <el-tag size="small">{{ row.type.toUpperCase() }}{{ row.phpVersion ? ` ${row.phpVersion}` : '' }}</el-tag>
@@ -61,7 +61,7 @@
 
     <el-dialog v-model="dialogVisible" title="创建网站" width="min(540px, 92vw)">
       <el-form :model="form" label-width="100px">
-        <el-form-item label="项目名" required>
+        <el-form-item label="网站名" required>
           <el-input v-model="form.name" placeholder="字母/数字/_-（将加 linuxmgr- 前缀）" />
         </el-form-item>
         <el-form-item label="类型" required>
@@ -159,7 +159,7 @@ onMounted(load)
 
 async function onCreate() {
   if (!form.name || !form.directory) {
-    ElMessage.warning('请填写项目名和目录')
+    ElMessage.warning('请填写网站名和目录')
     return
   }
   if (form.type !== 'php' && !form.entry) {
@@ -177,7 +177,7 @@ async function onCreate() {
     } else payload.entry = form.entry
     if (form.domain.trim()) payload.domain = form.domain.trim()
     await createProject(serverStore.currentId!, payload as never)
-    ElMessage.success('项目创建成功')
+    ElMessage.success('网站创建成功')
     dialogVisible.value = false
     form.name = ''
     form.entry = ''

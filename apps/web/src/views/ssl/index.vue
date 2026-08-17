@@ -72,9 +72,9 @@
 
     <el-dialog v-model="noDomainDialog" title="提示" width="min(420px, 92vw)">
       <el-empty description="暂无可用的项目域名" />
-      <p class="no-domain-hint">请先在「项目」中创建项目并配置域名，然后在 SSL 页面选择该域名生成证书。</p>
+      <p class="no-domain-hint">请先在「网站管理」中创建网站并配置域名，然后在 SSL 页面选择该域名生成证书。</p>
       <template #footer>
-        <el-button type="primary" @click="goProjects">去创建项目</el-button>
+        <el-button type="primary" @click="goProjects">去创建网站</el-button>
       </template>
     </el-dialog>
   </div>
