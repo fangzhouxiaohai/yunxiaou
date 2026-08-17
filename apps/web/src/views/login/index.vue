@@ -1,7 +1,8 @@
 <template>
   <div class="login-page">
-    <div class="login-panel">
-      <div class="brand-side">
+    <div class="brand-side" :style="{ backgroundImage: `url(${bgUrl})` }">
+      <div class="brand-mask"></div>
+      <div class="brand-content">
         <div class="brand-name">云小U</div>
         <div class="brand-sub">服务器管理面板</div>
         <ul class="feature-list">
@@ -10,22 +11,22 @@
           <li>安全可靠 · 操作留痕</li>
         </ul>
       </div>
-      <div class="form-side">
-        <div class="form-inner">
-          <div class="form-title">欢迎登录</div>
-          <div class="form-tip">请使用管理员账号登录系统</div>
-          <el-form :model="form" @keyup.enter="onSubmit">
-            <el-form-item>
-              <el-input v-model="form.username" placeholder="用户名" size="large" :prefix-icon="User" />
-            </el-form-item>
-            <el-form-item>
-              <el-input v-model="form.password" type="password" placeholder="密码" size="large" show-password :prefix-icon="Lock" />
-            </el-form-item>
-            <el-button type="primary" size="large" class="submit" :loading="loading" @click="onSubmit">
-              登 录
-            </el-button>
-          </el-form>
-        </div>
+    </div>
+    <div class="form-side">
+      <div class="form-inner">
+        <div class="form-title">欢迎登录</div>
+        <div class="form-tip">请使用管理员账号登录系统</div>
+        <el-form :model="form" @keyup.enter="onSubmit">
+          <el-form-item>
+            <el-input v-model="form.username" placeholder="用户名" size="large" :prefix-icon="User" />
+          </el-form-item>
+          <el-form-item>
+            <el-input v-model="form.password" type="password" placeholder="密码" size="large" show-password :prefix-icon="Lock" />
+          </el-form-item>
+          <el-button type="primary" size="large" class="submit" :loading="loading" @click="onSubmit">
+            登 录
+          </el-button>
+        </el-form>
       </div>
     </div>
   </div>
@@ -37,6 +38,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
+import bgUrl from '@/assets/login-city.jpg'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -65,54 +67,50 @@ async function onSubmit() {
 .login-page {
   height: 100%;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  background:
-    radial-gradient(ellipse 60% 50% at 20% 10%, rgba(59, 111, 224, 0.35), transparent),
-    radial-gradient(ellipse 50% 40% at 85% 85%, rgba(43, 90, 160, 0.4), transparent),
-    linear-gradient(135deg, #0f1f3d, #1f3b73);
-}
-.login-panel {
-  display: flex;
-  width: min(880px, 94vw);
-  height: min(560px, 82vh);
-  border-radius: 12px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
-  overflow: hidden;
-  animation: rise 0.4s ease-out;
+  background: var(--bg-card);
 }
 .brand-side {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 48px;
-  color: #ffffff;
-  background:
-    radial-gradient(ellipse 60% 50% at 20% 10%, rgba(92, 135, 230, 0.35), transparent),
-    radial-gradient(ellipse 50% 45% at 90% 90%, rgba(43, 90, 160, 0.5), transparent),
-    linear-gradient(150deg, #0f1f3d, #1f3b73);
   position: relative;
-  &::before {
-    content: '';
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  .brand-mask {
     position: absolute;
     inset: 0;
-    background-image:
-      repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 32px),
-      repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 32px);
-    pointer-events: none;
+    background: linear-gradient(120deg, rgba(8, 18, 38, 0.82) 0%, rgba(8, 18, 38, 0.45) 55%, rgba(8, 18, 38, 0.25) 100%);
   }
-  .brand-name { font-size: 28px; font-weight: 700; letter-spacing: 2px; }
-  .brand-sub { margin-top: 8px; font-size: 14px; color: rgba(255, 255, 255, 0.75); }
+  .brand-content {
+    position: relative;
+    padding: 0 64px;
+    color: #ffffff;
+    animation: rise 0.5s ease-out;
+  }
+  .brand-name {
+    font-size: 44px;
+    font-weight: 700;
+    letter-spacing: 6px;
+    text-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
+  }
+  .brand-sub {
+    margin-top: 12px;
+    font-size: 16px;
+    letter-spacing: 2px;
+    color: rgba(255, 255, 255, 0.85);
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  }
   .feature-list {
-    margin-top: 36px;
+    margin-top: 44px;
     list-style: none;
     li {
       position: relative;
       padding-left: 20px;
-      margin-bottom: 14px;
+      margin-bottom: 16px;
       font-size: 14px;
-      color: rgba(255, 255, 255, 0.85);
+      color: rgba(255, 255, 255, 0.9);
+      text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
       &::before {
         content: '';
         position: absolute;
@@ -122,27 +120,47 @@ async function onSubmit() {
         height: 6px;
         border-radius: 50%;
         background: #8fb0f2;
+        box-shadow: 0 0 6px rgba(143, 176, 242, 0.9);
       }
     }
   }
 }
 .form-side {
-  width: 400px;
+  width: 440px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 40px 36px;
+  padding: 40px 48px;
   background: var(--bg-card);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.18);
+  position: relative;
+  z-index: 1;
   .form-inner { width: 100%; }
-  .form-title { font-size: 20px; font-weight: 600; color: var(--text-1); }
-  .form-tip { margin: 6px 0 24px; font-size: 13px; color: var(--text-3); }
+  .form-title { font-size: 24px; font-weight: 600; color: var(--text-1); }
+  .form-tip { margin: 8px 0 28px; font-size: 13px; color: var(--text-3); }
   .submit { width: 100%; letter-spacing: 4px; }
 }
 @media (max-width: 767px) {
-  .brand-side { display: none; }
-  .login-panel { height: auto; min-height: 380px; }
-  .form-side { width: 100%; }
+  .login-page {
+    flex-direction: column;
+    background-size: cover;
+    background-position: center;
+  }
+  .brand-side {
+    flex: none;
+    width: 100%;
+    padding: 40px 24px 28px;
+    .brand-content { padding: 0; }
+    .brand-name { font-size: 30px; letter-spacing: 3px; }
+    .feature-list { display: none; }
+  }
+  .form-side {
+    width: 100%;
+    flex: 1;
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.18);
+    border-radius: 16px 16px 0 0;
+  }
 }
 @keyframes rise {
   from { opacity: 0; transform: translateY(16px); }
