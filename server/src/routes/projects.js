@@ -230,7 +230,7 @@ WantedBy=multi-user.target`;
       out.domains = s.domains;
     }
     if (s.runDir !== undefined) {
-      if (!RUNDIR_RE.test(s.runDir)) return { error: '运行目录不合法' };
+      if (s.runDir !== '' && !RUNDIR_RE.test(s.runDir)) return { error: '运行目录不合法' };
       out.runDir = s.runDir;
     }
     if (s.index !== undefined) {
@@ -311,10 +311,15 @@ WantedBy=multi-user.target`;
     if (!cfg) return;
     let phpVersions = [];
     if (project.type === 'php') {
-      const r = await pool.run(cfg, 'ls /var/run/php*-php-fpm.sock 2>/dev/null');
-      phpVersions = (r.stdout || '').split('\n')
-        .map((l) => l.trim().match(/php(\d+)-php-fpm\.sock/))
-        .filter(Boolean).map((m) => `php${m[1]}`);
+      // 探测失败不阻塞设置读取，返回空版本列表
+      try {
+        const r = await pool.run(cfg, 'ls /var/run/php*-php-fpm.sock 2>/dev/null');
+        phpVersions = (r.stdout || '').split('\n')
+          .map((l) => l.trim().match(/php(\d+)-php-fpm\.sock/))
+          .filter(Boolean).map((m) => `php${m[1]}`);
+      } catch {
+        phpVersions = [];
+      }
     }
     res.json({ code: 0, data: { settings: defaultSettings(project), phpVersions, sslDomain: project.sslDomain || '' } });
   });
@@ -340,7 +345,8 @@ WantedBy=multi-user.target`;
       } else if (project.type !== 'php' && project.proxy?.enabled && !next.proxy?.enabled) {
         // 关闭反向代理：删除 vhost
         await pool.run(cfg, `rm -f /etc/nginx/conf.d/${name}.conf`);
-        await pool.run(cfg, 'nginx -s reload');
+        // nginx 未运行（纯 systemd 服务器）时 reload 失败不影响结果
+        await pool.run(cfg, 'nginx -s reload || true');
         await applyBasicAuth({ pool, config }, cfg, next);
       }
       projectStore.write(list.map((p) => (p.name === name ? next : p)));

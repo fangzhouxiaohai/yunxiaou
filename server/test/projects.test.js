@@ -215,3 +215,14 @@ test('设置校验：非法域名/IP/重定向/自定义规则', async () => {
     assert.equal(res.status, 400, JSON.stringify(settings));
   }
 });
+
+test('保存设置：runDir 传空字符串可清空运行目录', async () => {
+  const { app, stores } = setup({ default: OK });
+  await createPhp(app);
+  stores.projects.write([{ name: 'linuxmgr-blog', type: 'php', directory: '/www/blog', port: 8080, phpVersion: 'php82', runDir: '/api', createdAt: new Date().toISOString() }]);
+  const res = await request(app).put('/api/servers/srv1/projects/linuxmgr-blog/settings').set(await auth(app))
+    .send({ settings: { runDir: '' } });
+  assert.equal(res.status, 200);
+  const saved = JSON.parse(fs.readFileSync(stores.projects.file, 'utf8'))[0];
+  assert.equal(saved.runDir, '');
+});
