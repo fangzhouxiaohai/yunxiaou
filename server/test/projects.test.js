@@ -184,7 +184,7 @@ test('保存设置：再生成 vhost 并持久化', async () => {
 
 test('保存设置：nginx 校验失败回滚且不保存', async () => {
   const { app, stores, calls } = setup({
-    'nginx -t && nginx -s reload': () => ({ code: 1, stdout: '', stderr: 'emerg: bad' }),
+    'nginx -t': () => ({ code: 1, stdout: '', stderr: 'emerg: bad' }),
     default: OK,
   });
   await request(app).post('/api/servers/srv1/projects').set(await auth(app))
@@ -246,4 +246,36 @@ test('网站日志读取', async () => {
   assert.equal(typeof res.body.data, 'string');
   const bad = await request(app).get('/api/servers/srv1/projects/linuxmgr-blog/sitelogs?type=evil').set(await auth(app));
   assert.equal(bad.status, 400);
+});
+
+test('带旧 SSL marker 的项目保存设置后 vhost 仍含 listen 443 ssl', async () => {
+  const { app, stores, calls } = setup({
+    "grep -o 'linuxmgr-ssl-\\S*' /etc/nginx/conf.d/linuxmgr-blog.conf || true": () => ({ code: 0, stdout: 'linuxmgr-ssl-a.com\n', stderr: '' }),
+    default: OK,
+  });
+  // 旧版项目记录：无 sslDomain 字段
+  stores.projects.write([{ name: 'linuxmgr-blog', type: 'php', directory: '/www/blog', port: 8080, phpVersion: 'php82', domains: ['a.com'], createdAt: new Date().toISOString() }]);
+  calls.length = 0;
+  const res = await request(app).put('/api/servers/srv1/projects/linuxmgr-blog/settings').set(await auth(app))
+    .send({ settings: { rewrite: { preset: 'wordpress' } } });
+  assert.equal(res.status, 200);
+  const joined = calls.join(' ');
+  assert.ok(joined.includes('# linuxmgr-ssl-a.com'), '再生成的 vhost 应保留 SSL 标记');
+  assert.ok(joined.includes('listen 443 ssl;'), '再生成的 vhost 应保留 443 段');
+  const saved = JSON.parse(fs.readFileSync(stores.projects.file, 'utf8'))[0];
+  assert.equal(saved.sslDomain, 'a.com', '检出的 marker 域名应回填到项目记录');
+});
+
+test('非 PHP 删除在 nginx reload 失败时仍成功', async () => {
+  const { app, calls } = setup({
+    // 若代码仍发裸 'nginx -s reload'，此 mock 使其失败；修复后命令带 || true 不匹配该 key
+    'nginx -s reload': () => ({ code: 1, stdout: '', stderr: 'nginx is not running' }),
+    default: OK,
+  });
+  await request(app).post('/api/servers/srv1/projects').set(await auth(app))
+    .send({ name: 'app1', type: 'node', directory: '/www/app1', port: 3001, entry: 'node server.js' });
+  const del = await request(app).delete('/api/servers/srv1/projects/linuxmgr-app1').set(await auth(app))
+    .send({ confirm: true });
+  assert.equal(del.status, 200);
+  assert.ok(calls.some((c) => c === 'nginx -s reload || true'), '删除路径的 reload 应带 || true');
 });

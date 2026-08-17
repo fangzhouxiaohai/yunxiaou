@@ -86,9 +86,14 @@ WantedBy=multi-user.target`;
         return res.status(400).json({ code: 400, message: err.message });
       }
     }
+    const fullName = `linuxmgr-${name}`;
+    // 名称查重前置：在任何 SSH 副作用之前拒绝重名
+    const list = projectStore.read();
+    if (list.some((p) => p.name === fullName)) {
+      return res.status(400).json({ code: 400, message: '项目已存在' });
+    }
     const cfg = sshCfg(server, res);
     if (!cfg) return;
-    const fullName = `linuxmgr-${name}`;
     try {
       const mkdir = await pool.run(cfg, `mkdir -p ${directory}`);
       if (mkdir.code !== 0) throw new Error(mkdir.stderr.slice(0, 200));
@@ -124,10 +129,6 @@ WantedBy=multi-user.target`;
         rewrite: type === 'php' ? { preset: req.body.rewritePreset || 'none' } : undefined,
         createdAt: new Date().toISOString(),
       };
-      const list = projectStore.read();
-      if (list.some((p) => p.name === fullName)) {
-        return res.status(400).json({ code: 400, message: '项目已存在' });
-      }
       list.push(project);
       projectStore.write(list);
       audit(config.dataDir, { action: 'project.create', target: server.host, detail: fullName, result: 'success' });
@@ -171,13 +172,17 @@ WantedBy=multi-user.target`;
     const cfg = sshCfg(server, res);
     if (!cfg) return;
     try {
-      const cmds = [`systemctl stop ${name}`, `systemctl disable ${name}`];
+      const cmds = [];
       const vhostName = name.replace('linuxmgr-', '');
+      // PHP 项目没有 systemd unit，跳过 stop/disable
+      if (project.type !== 'php') {
+        cmds.push(`systemctl stop ${name}`, `systemctl disable ${name}`);
+      }
       cmds.push(
         `mkdir -p /tmp/linuxmgr-backup && cp /etc/nginx/conf.d/linuxmgr-${vhostName}.conf /tmp/linuxmgr-backup/ 2>/dev/null || true`,
         `rm -f /etc/nginx/conf.d/linuxmgr-${vhostName}.conf`,
         `rm -f /etc/nginx/linuxmgr-htpasswd-${name}`,
-        'nginx -s reload'
+        'nginx -s reload || true'
       );
       if (project.type !== 'php') {
         cmds.push(`rm -f /etc/systemd/system/${name}.service`);
@@ -196,8 +201,8 @@ WantedBy=multi-user.target`;
   });
 
   const IP_RE = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;
-  const REDIRECT_URL_RE = /^https?:\/\/[^\s]{1,200}$|^\/[^\s]{0,200}$/;
-  const PATH_RE = /^\/[^\s]{0,200}$/;
+  const REDIRECT_URL_RE = /^https?:\/\/[^\s;{}]{1,200}$|^\/[^\s;{}]{0,200}$/;
+  const PATH_RE = /^\/[^\s;{}]{0,200}$/;
   const RUNDIR_RE = /^\/[a-zA-Z0-9_\/.-]{0,100}$/;
   const INDEX_RE = /^[a-zA-Z0-9_. ]{1,100}$/;
   const USERNAME_RE = /^[a-zA-Z0-9_]{1,32}$/;
@@ -230,7 +235,7 @@ WantedBy=multi-user.target`;
       out.domains = s.domains;
     }
     if (s.runDir !== undefined) {
-      if (s.runDir !== '' && !RUNDIR_RE.test(s.runDir)) return { error: '运行目录不合法' };
+      if (s.runDir !== '' && (!RUNDIR_RE.test(s.runDir) || s.runDir.includes('..'))) return { error: '运行目录不合法' };
       out.runDir = s.runDir;
     }
     if (s.index !== undefined) {
@@ -340,8 +345,15 @@ WantedBy=multi-user.target`;
       const next = { ...project, ...settings };
       const needsVhost = next.type === 'php' || next.proxy?.enabled;
       if (needsVhost) {
-        await applyBasicAuth({ pool, config }, cfg, next);
+        // 旧版 linkVhost 曾追加 # linuxmgr-ssl-<domain> 标记但项目记录无 sslDomain 字段，
+        // 声明式再生成前探测旧 vhost，检出 marker 则回填域名以保留 443 段
+        if (!next.sslDomain) {
+          const probe = await pool.run(cfg, `grep -o 'linuxmgr-ssl-\\S*' /etc/nginx/conf.d/${name}.conf || true`);
+          const m = (probe.stdout || '').match(/linuxmgr-ssl-(\S+)/);
+          if (m) next.sslDomain = m[1];
+        }
         await applyVhost({ pool }, cfg, next);
+        await applyBasicAuth({ pool, config }, cfg, next);
       } else if (project.type !== 'php' && project.proxy?.enabled && !next.proxy?.enabled) {
         // 关闭反向代理：删除 vhost
         await pool.run(cfg, `rm -f /etc/nginx/conf.d/${name}.conf`);

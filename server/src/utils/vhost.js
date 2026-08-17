@@ -102,7 +102,7 @@ async function applyVhost({ pool }, cfg, project) {
   const backup = await pool.run(cfg, `cat ${confPath} 2>/dev/null || true`);
   const w = await pool.run(cfg, `cat > ${confPath} <<'LINUXMGR_EOF'\n${vhost}\nLINUXMGR_EOF`);
   if (w.code !== 0) throw new Error(`写入 vhost 失败: ${w.stderr.slice(0, 200)}`);
-  const t = await pool.run(cfg, 'nginx -t && nginx -s reload');
+  const t = await pool.run(cfg, 'nginx -t');
   if (t.code !== 0) {
     if (backup.stdout && backup.stdout.includes('server {')) {
       await pool.run(cfg, `cat > ${confPath} <<'LINUXMGR_EOF'\n${backup.stdout}\nLINUXMGR_EOF`);
@@ -112,6 +112,9 @@ async function applyVhost({ pool }, cfg, project) {
     await pool.run(cfg, 'nginx -s reload');
     throw new Error(`Nginx 配置校验失败，已还原旧配置: ${t.stderr.slice(0, 200)}`);
   }
+  // 配置已校验合法，reload 失败单独报错、不回滚
+  const rl = await pool.run(cfg, 'nginx -s reload');
+  if (rl.code !== 0) throw new Error(`Nginx reload 失败（配置已校验通过）: ${rl.stderr.slice(0, 200)}`);
 }
 
 // 密码访问：生成 htpasswd（密码经 base64 传递避免 shell 注入）

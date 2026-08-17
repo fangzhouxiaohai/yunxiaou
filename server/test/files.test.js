@@ -182,7 +182,8 @@ test('自签证书自动设置续期（脚本 + crontab）并关联项目 vhost'
   assert.ok(joined.includes('# linuxmgr-renew-blog.example.com'), 'crontab 应带标记');
   assert.ok(joined.includes('0 3 * * * /usr/local/bin/linuxmgr-renew-blog.example.com.sh'), '应每天 3 点检查');
   assert.ok(joined.includes('listen 443 ssl'), 'vhost 应追加 443 ssl 段');
-  assert.ok(joined.includes('nginx -t && nginx -s reload'), '应 reload nginx');
+  assert.ok(joined.includes('nginx -t'), '应校验 nginx 配置');
+  assert.ok(joined.includes('nginx -s reload'), '应 reload nginx');
 });
 
 test('自签证书重复生成时 vhost 不重复生成（幂等，按 sslDomain 判断）', async () => {
