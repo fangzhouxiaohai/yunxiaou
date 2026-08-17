@@ -19,7 +19,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from 'vue'
 import { Terminal } from 'xterm'
-import { FitAddon } from 'xterm-addon-fit'
+import { FitAddon } from '@xterm/addon-fit'
 import 'xterm/css/xterm.css'
 import { useServerStore } from '@/stores/server'
 import { useUserStore } from '@/stores/user'
@@ -35,7 +35,7 @@ let resizeHandler: (() => void) | null = null
 const connected = ref(false)
 
 function onResize() {
-  if (fit && term && !term.disposed) {
+  if (fit && term) {
     fit.fit()
     if (ws && ws.readyState === WebSocket.OPEN && term) {
       ws.send(JSON.stringify({ resize: { rows: term.rows, cols: term.cols } }))
