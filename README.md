@@ -5,9 +5,9 @@
 ## 界面预览
 
 <p align="center">
-  <img src="docs/images/screenshot-dashboard.png" alt="监控大盘" width="90%" />
+  <img src="docs/images/screenshot-dashboard.png" alt="数据监控" width="90%" />
   <br />
-  <em>监控大盘：CPU / 内存 / 磁盘 / 网络实时图表</em>
+  <em>数据监控：CPU / 内存 / 磁盘 / 网络实时图表</em>
 </p>
 
 <p align="center">
@@ -19,7 +19,7 @@
 <p align="center">
   <img src="docs/images/screenshot-login.png" alt="登录页" width="90%" />
   <br />
-  <em>登录页</em>
+  <em>登录页：城市背景品牌区 + 登录表单</em>
 </p>
 
 ## 功能特性

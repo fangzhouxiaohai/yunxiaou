@@ -80,7 +80,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { Cpu, Coin, Files, Odometer } from '@element-plus/icons-vue'
 import { getMonitor, type MonitorData } from '@/api/monitor'
@@ -198,19 +198,37 @@ function onResize() {
   netChart?.resize()
 }
 
-onMounted(() => {
-  if (cpuChartEl.value) {
+function initCharts() {
+  if (!cpuChart && cpuChartEl.value) {
     cpuChart = echarts.init(cpuChartEl.value)
   }
-  if (netChartEl.value) {
+  if (!netChart && netChartEl.value) {
     netChart = echarts.init(netChartEl.value)
   }
+}
+
+let disposed = false
+
+onMounted(async () => {
+  // 服务器列表可能异步加载，v-else 分支此时未必渲染，需等 current 就绪后再初始化图表
+  if (!serverStore.current) {
+    await new Promise<void>((resolve) => {
+      const stop = watch(
+        () => serverStore.current,
+        (v) => { if (v) { stop(); resolve() } },
+      )
+    })
+    await nextTick()
+  }
+  if (disposed) return
+  initCharts()
   refresh()
   timer = window.setInterval(refresh, 3000)
   window.addEventListener('resize', onResize)
 })
 
 onBeforeUnmount(() => {
+  disposed = true
   if (timer) window.clearInterval(timer)
   window.removeEventListener('resize', onResize)
   cpuChart?.dispose()
