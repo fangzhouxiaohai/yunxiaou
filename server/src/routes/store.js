@@ -43,19 +43,21 @@ function createStoreRouter({ config, pool, store }) {
     if (!cfg) return;
     try {
       const pkg = await detectPkgManager(cfg);
-      const items = [];
-      for (const soft of SOFTWARE) {
-        const version = await pool.run(cfg, soft.versionCmd);
-        const installed = version.code === 0 && version.stdout.trim() !== '';
-        items.push({
-          name: soft.name,
-          display: soft.display,
-          desc: soft.desc,
-          installed,
-          version: installed ? version.stdout.trim().split('\n')[0] : '',
-          package: soft.pkg[pkg],
-        });
-      }
+      // 并行执行版本检测（连接池内部限流 maxConcurrent=4）
+      const items = await Promise.all(
+        SOFTWARE.map(async (soft) => {
+          const version = await pool.run(cfg, soft.versionCmd);
+          const installed = version.code === 0 && version.stdout.trim() !== '';
+          return {
+            name: soft.name,
+            display: soft.display,
+            desc: soft.desc,
+            installed,
+            version: installed ? version.stdout.trim().split('\n')[0] : '',
+            package: soft.pkg[pkg],
+          };
+        })
+      );
       res.json({ code: 0, data: items });
     } catch (err) {
       res.status(502).json({ code: 502, message: `软件状态检测失败: ${err.message}` });

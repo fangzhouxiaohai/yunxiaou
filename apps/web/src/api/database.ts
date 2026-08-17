@@ -1,6 +1,14 @@
 import request from './request'
 
+export interface DbListResult {
+  available: boolean
+  databases?: string[]
+  message?: string
+}
+
 export interface RedisInfo {
+  available: boolean
+  message?: string
   version: string
   mode: string
   connectedClients: number
@@ -12,8 +20,14 @@ export interface RedisInfo {
   databases: Array<{ db: string; keys: number; expires: number }>
 }
 
+export interface RedisKeysResult {
+  available: boolean
+  keys?: string[]
+  message?: string
+}
+
 export function listDatabases(serverId: string) {
-  return request.get(`/servers/${serverId}/databases`) as Promise<string[]>
+  return request.get(`/servers/${serverId}/databases`) as Promise<DbListResult>
 }
 
 export function createDatabase(serverId: string, payload: { name: string; username: string; password: string }) {
@@ -29,7 +43,7 @@ export function getRedisInfo(serverId: string) {
 }
 
 export function listRedisKeys(serverId: string) {
-  return request.get(`/servers/${serverId}/redis/keys`) as Promise<string[]>
+  return request.get(`/servers/${serverId}/redis/keys`) as Promise<RedisKeysResult>
 }
 
 export function flushRedis(serverId: string, confirm: boolean) {

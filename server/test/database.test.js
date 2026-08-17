@@ -51,8 +51,19 @@ test('数据库列表', async () => {
   });
   const res = await request(app).get('/api/servers/srv1/databases').set(await auth(app));
   assert.equal(res.status, 200);
-  assert.ok(res.body.data.includes('app_blog'));
+  assert.equal(res.body.data.available, true);
+  assert.ok(res.body.data.databases.includes('app_blog'));
   assert.ok(calls.some((c) => c.includes('SHOW DATABASES')));
+});
+
+test('MySQL 未安装时返回 unavailable 而非报错', async () => {
+  const { app } = setup({
+    default: () => ({ code: 127, stdout: '', stderr: 'bash: mysql: command not found' }),
+  });
+  const res = await request(app).get('/api/servers/srv1/databases').set(await auth(app));
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.available, false);
+  assert.ok(res.body.data.message.includes('mysql'));
 });
 
 test('创建数据库+用户+授权', async () => {
@@ -94,8 +105,19 @@ test('Redis 状态', async () => {
   });
   const res = await request(app).get('/api/servers/srv1/redis').set(await auth(app));
   assert.equal(res.status, 200);
+  assert.equal(res.body.data.available, true);
   assert.equal(res.body.data.version, '7.0.15');
   assert.equal(res.body.data.totalKeys, 5);
+});
+
+test('Redis 未安装时返回 unavailable 而非报错', async () => {
+  const { app } = setup({
+    default: () => ({ code: 127, stdout: '', stderr: 'bash: redis-cli: command not found' }),
+  });
+  const res = await request(app).get('/api/servers/srv1/redis').set(await auth(app));
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.available, false);
+  assert.ok(res.body.data.message.includes('redis-cli'));
 });
 
 test('Redis 清空需确认且审计', async () => {

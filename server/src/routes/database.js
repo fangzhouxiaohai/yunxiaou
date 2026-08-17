@@ -58,8 +58,14 @@ function createDatabaseRouter({ config, pool, store }) {
     if (cfg === null) return;
     try {
       const result = await pool.run(cfg, cmd);
-      if (result.code !== 0) throw new Error(result.stderr.slice(0, 200) || `退出码 ${result.code}`);
-      res.json({ code: 0, data: parseDatabases(result.stdout) });
+      if (result.code !== 0) {
+        // mysql 客户端不可用（未安装等）→ 结构化状态而非报错
+        return res.json({
+          code: 0,
+          data: { available: false, message: result.stderr.trim() || 'MySQL 未安装或未运行' },
+        });
+      }
+      res.json({ code: 0, data: { available: true, databases: parseDatabases(result.stdout) } });
     } catch (err) {
       res.status(502).json({ code: 502, message: `获取数据库列表失败: ${err.message}` });
     }
@@ -129,8 +135,14 @@ function createDatabaseRouter({ config, pool, store }) {
     if (cfg === null) return;
     try {
       const result = await pool.run(cfg, `redis-cli ${authPart} INFO`);
-      if (result.code !== 0) throw new Error(result.stderr.slice(0, 200) || `退出码 ${result.code}`);
-      res.json({ code: 0, data: parseRedisInfo(result.stdout) });
+      if (result.code !== 0) {
+        // redis-cli 不可用（未安装等）→ 结构化状态而非报错
+        return res.json({
+          code: 0,
+          data: { available: false, message: result.stderr.trim() || 'Redis 未安装或未运行' },
+        });
+      }
+      res.json({ code: 0, data: { available: true, ...parseRedisInfo(result.stdout) } });
     } catch (err) {
       res.status(502).json({ code: 502, message: `获取 Redis 状态失败: ${err.message}` });
     }
@@ -146,9 +158,14 @@ function createDatabaseRouter({ config, pool, store }) {
     if (cfg === null) return;
     try {
       const result = await pool.run(cfg, `redis-cli ${authPart} --scan --count 100`);
-      if (result.code !== 0) throw new Error(result.stderr.slice(0, 200) || `退出码 ${result.code}`);
+      if (result.code !== 0) {
+        return res.json({
+          code: 0,
+          data: { available: false, message: result.stderr.trim() || 'Redis 未安装或未运行' },
+        });
+      }
       const keys = result.stdout.split('\n').map((k) => k.trim()).filter(Boolean);
-      res.json({ code: 0, data: keys });
+      res.json({ code: 0, data: { available: true, keys } });
     } catch (err) {
       res.status(502).json({ code: 502, message: `获取 Redis 键列表失败: ${err.message}` });
     }

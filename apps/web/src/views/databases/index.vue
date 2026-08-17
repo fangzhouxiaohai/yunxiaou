@@ -5,7 +5,15 @@
   <el-tabs v-else v-model="activeTab">
     <el-tab-pane label="MySQL/MariaDB" name="mysql">
       <el-card>
-        <div class="toolbar">
+        <el-alert
+          v-if="mysqlUnavailable"
+          :title="mysqlMessage"
+          type="warning"
+          show-icon
+          :closable="false"
+          class="alert-gap"
+        />
+        <div v-else class="toolbar">
           <el-button type="primary" @click="dbDialogVisible = true">创建数据库</el-button>
         </div>
         <el-table :data="databases" v-loading="dbLoading">
@@ -20,6 +28,15 @@
     </el-tab-pane>
 
     <el-tab-pane label="Redis" name="redis">
+      <el-alert
+        v-if="redisUnavailable"
+        :title="redisMessage"
+        type="warning"
+        show-icon
+        :closable="false"
+        class="alert-gap"
+      />
+      <template v-else>
       <el-row :gutter="16">
         <el-col :span="6"><el-card><div class="stat"><div class="label">版本</div><div class="value">{{ redisInfo?.version || '--' }}</div></div></el-card></el-col>
         <el-col :span="6"><el-card><div class="stat"><div class="label">内存占用</div><div class="value">{{ memText }}</div></div></el-card></el-col>
@@ -40,6 +57,7 @@
           <el-table-column prop="key" label="键名" />
         </el-table>
       </el-card>
+      </template>
     </el-tab-pane>
   </el-tabs>
 
@@ -78,6 +96,10 @@ const dbForm = reactive({ name: '', username: '', password: '' })
 const redisInfo = ref<RedisInfo | null>(null)
 const redisKeys = ref<Array<{ key: string }>>([])
 const redisLoading = ref(false)
+const mysqlUnavailable = ref(false)
+const mysqlMessage = ref('')
+const redisUnavailable = ref(false)
+const redisMessage = ref('')
 
 const memText = computed(() => {
   const m = redisInfo.value?.usedMemory
@@ -88,8 +110,15 @@ async function loadDatabases() {
   if (!serverStore.currentId) return
   dbLoading.value = true
   try {
-    const names = await listDatabases(serverStore.currentId)
-    databases.value = names.map((name) => ({ name }))
+    const result = await listDatabases(serverStore.currentId)
+    if (!result.available) {
+      mysqlUnavailable.value = true
+      mysqlMessage.value = result.message || 'MySQL 未安装或未运行'
+      databases.value = []
+      return
+    }
+    mysqlUnavailable.value = false
+    databases.value = (result.databases || []).map((name) => ({ name }))
   } finally {
     dbLoading.value = false
   }
@@ -99,9 +128,20 @@ async function loadRedis() {
   if (!serverStore.currentId) return
   redisLoading.value = true
   try {
-    redisInfo.value = await getRedisInfo(serverStore.currentId)
+    const info = await getRedisInfo(serverStore.currentId)
+    if (!info.available) {
+      redisUnavailable.value = true
+      redisMessage.value = info.message || 'Redis 未安装或未运行'
+      redisInfo.value = null
+      redisKeys.value = []
+      return
+    }
+    redisUnavailable.value = false
+    redisInfo.value = info
     const keys = await listRedisKeys(serverStore.currentId)
-    redisKeys.value = keys.map((key) => ({ key }))
+    if (keys.available) {
+      redisKeys.value = (keys.keys || []).map((key) => ({ key }))
+    }
   } finally {
     redisLoading.value = false
   }
@@ -150,6 +190,7 @@ async function onFlushRedis() {
 
 <style scoped lang="scss">
 .toolbar { margin-bottom: 16px; }
+.alert-gap { margin-bottom: 16px; }
 .row-gap { margin-top: 16px; }
 .stat {
   .label { font-size: 13px; color: #909399; margin-bottom: 8px; }

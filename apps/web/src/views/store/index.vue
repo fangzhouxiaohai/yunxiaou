@@ -3,7 +3,21 @@
     <el-empty description="请先在「服务器管理」中添加并选择服务器" />
   </div>
   <div v-else>
-    <el-row :gutter="16">
+    <el-skeleton v-if="loading" animated class="skeleton">
+      <template #template>
+        <el-row :gutter="16">
+          <el-col v-for="i in 8" :key="i" :span="6" class="col">
+            <el-card>
+              <el-skeleton-item variant="h3" style="width: 60%" />
+              <el-skeleton-item variant="text" style="margin-top: 12px" />
+              <el-skeleton-item variant="text" style="width: 40%; margin-top: 6px" />
+              <el-skeleton-item variant="button" style="width: 100%; margin-top: 16px" />
+            </el-card>
+          </el-col>
+        </el-row>
+      </template>
+    </el-skeleton>
+    <el-row v-else :gutter="16">
       <el-col v-for="item in items" :key="item.name" :span="6" class="col">
         <el-card class="soft-card">
           <div class="soft-name">{{ item.display }}</div>
@@ -37,10 +51,16 @@ import { useServerStore } from '@/stores/server'
 const serverStore = useServerStore()
 const items = ref<StoreItem[]>([])
 const installing = ref('')
+const loading = ref(true)
 
 async function load() {
   if (!serverStore.currentId) return
-  items.value = await listStore(serverStore.currentId)
+  loading.value = true
+  try {
+    items.value = await listStore(serverStore.currentId)
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(load)
