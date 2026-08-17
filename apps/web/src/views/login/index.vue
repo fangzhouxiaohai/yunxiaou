@@ -1,15 +1,18 @@
 <template>
   <div class="login-page">
     <el-card class="login-card">
-      <h2 class="title">云小U 服务器管理</h2>
+      <div class="brand">
+        <div class="brand-name">云小U</div>
+        <div class="brand-sub">服务器管理面板</div>
+      </div>
       <el-form :model="form" @keyup.enter="onSubmit">
         <el-form-item>
-          <el-input v-model="form.username" placeholder="用户名" size="large" />
+          <el-input v-model="form.username" placeholder="用户名" size="large" :prefix-icon="User" />
         </el-form-item>
         <el-form-item>
-          <el-input v-model="form.password" type="password" placeholder="密码" size="large" show-password />
+          <el-input v-model="form.password" type="password" placeholder="密码" size="large" show-password :prefix-icon="Lock" />
         </el-form-item>
-        <el-button type="primary" size="large" style="width: 100%" :loading="loading" @click="onSubmit">
+        <el-button type="primary" size="large" class="submit" :loading="loading" @click="onSubmit">
           登 录
         </el-button>
       </el-form>
@@ -21,6 +24,7 @@
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { User, Lock } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
@@ -48,11 +52,28 @@ async function onSubmit() {
 
 <style scoped lang="scss">
 .login-page {
-  height: 100%; display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #1f3b73, #2b5aa0);
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(ellipse 60% 50% at 20% 10%, rgba(59, 111, 224, 0.35), transparent),
+    radial-gradient(ellipse 50% 40% at 85% 85%, rgba(43, 90, 160, 0.4), transparent),
+    linear-gradient(135deg, #0f1f3d, #1f3b73);
 }
 .login-card {
-  width: 380px; padding: 8px 12px;
-  .title { text-align: center; margin-bottom: 24px; color: #1f3b73; }
+  width: min(440px, 92vw);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  animation: rise 0.4s ease-out;
+  :deep(.el-card__body) { padding: 36px 36px 28px; }
+  .brand { text-align: center; margin-bottom: 28px; }
+  .brand-name { font-size: 26px; font-weight: 700; color: var(--brand); letter-spacing: 2px; }
+  .brand-sub { margin-top: 6px; font-size: 13px; color: var(--text-3); }
+  .submit { width: 100%; letter-spacing: 4px; }
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 </style>
