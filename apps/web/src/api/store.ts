@@ -11,6 +11,7 @@ export interface StoreItem {
   versions?: string[]
   defaultVersion?: string
   fpm?: string
+  isDefault?: boolean
 }
 
 export function listStore(serverId: string) {
@@ -21,6 +22,14 @@ export function installSoftware(serverId: string, name: string, version?: string
   return request.post(`/servers/${serverId}/store/${name}/install`, version ? { version } : {})
 }
 
+export function uninstallSoftware(serverId: string, name: string, confirm: boolean) {
+  return request.post(`/servers/${serverId}/store/${name}/uninstall`, { confirm })
+}
+
 export function switchJava(serverId: string, version: string) {
   return request.post(`/servers/${serverId}/store/java/switch`, { version })
+}
+
+export function setPhpDefault(serverId: string, version: string) {
+  return request.post(`/servers/${serverId}/store/php/default`, { version })
 }

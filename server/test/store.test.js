@@ -81,6 +81,8 @@ test('安装 PHP 版本走 remi 源（rhel 系）', async () => {
     'yum-config-manager --enable remi-php81': () => ({ code: 0, stdout: '', stderr: '' }),
     'yum install -y php81-php-fpm': () => ({ code: 0, stdout: '', stderr: '' }),
     'systemctl enable --now php81-php-fpm': () => ({ code: 0, stdout: '', stderr: '' }),
+    'command -v php >/dev/null 2>&1 && echo yes || echo no': () => ({ code: 0, stdout: 'no', stderr: '' }),
+    'alternatives --set php /usr/bin/php81': () => ({ code: 0, stdout: '', stderr: '' }),
     default: NOT_FOUND,
   });
   const res = await request(app).post('/api/servers/srv1/store/php81/install').set(await auth(app));
@@ -88,6 +90,82 @@ test('安装 PHP 版本走 remi 源（rhel 系）', async () => {
   const joined = calls.join(' ');
   assert.ok(joined.includes('remi-php81'), '应启用 remi-php81 源');
   assert.ok(joined.includes('php81-php-fpm'), '应安装 php81-php-fpm');
+  assert.ok(joined.includes('alternatives --set php /usr/bin/php81'), '无默认时新装版本应自动成为默认');
+});
+
+test('PHP 默认版本检测与标注', async () => {
+  const { app } = setup({
+    'php -v 2>&1': () => ({ code: 0, stdout: 'PHP 8.2.20 (cli)', stderr: '' }),
+    'php82 -v 2>&1': () => ({ code: 0, stdout: 'PHP 8.2.20 (cli)', stderr: '' }),
+    default: NOT_FOUND,
+  });
+  const res = await request(app).get('/api/servers/srv1/store').set(await auth(app));
+  const php82 = res.body.data.find((s) => s.name === 'php82');
+  const php81 = res.body.data.find((s) => s.name === 'php81');
+  assert.equal(php82.isDefault, true, 'php82 应为默认（php 命令指向 8.2）');
+  assert.equal(php81.isDefault, false);
+});
+
+test('设置指定 PHP 版本为默认', async () => {
+  const { app, calls } = setup({
+    'alternatives --set php /usr/bin/php82': () => ({ code: 0, stdout: '', stderr: '' }),
+    default: NOT_FOUND,
+  });
+  const res = await request(app).post('/api/servers/srv1/store/php/default').set(await auth(app))
+    .send({ version: 'php82' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.defaultPhp, 'php82');
+  assert.ok(calls.some((c) => c.includes('alternatives --set php /usr/bin/php82')));
+});
+
+test('卸载 PHP 版本（停服务 + 移除包）', async () => {
+  const { app, calls } = setup({
+    'systemctl disable --now php81-php-fpm': () => ({ code: 0, stdout: '', stderr: '' }),
+    'yum remove -y php81-php-fpm': () => ({ code: 0, stdout: '', stderr: '' }),
+    default: NOT_FOUND,
+  });
+  const res = await request(app).post('/api/servers/srv1/store/php81/uninstall').set(await auth(app))
+    .send({ confirm: true });
+  assert.equal(res.status, 200);
+  const joined = calls.join(' ');
+  assert.ok(joined.includes('systemctl disable --now php81-php-fpm'));
+  assert.ok(joined.includes('yum remove -y php81-php-fpm'));
+});
+
+test('卸载普通软件（git）', async () => {
+  const { app, calls } = setup({
+    'yum remove -y git': () => ({ code: 0, stdout: '', stderr: '' }),
+    default: NOT_FOUND,
+  });
+  const res = await request(app).post('/api/servers/srv1/store/git/uninstall').set(await auth(app))
+    .send({ confirm: true });
+  assert.equal(res.status, 200);
+  assert.ok(calls.some((c) => c.includes('yum remove -y git')));
+});
+
+test('卸载未确认时拒绝', async () => {
+  const { app } = setup({ default: NOT_FOUND });
+  const res = await request(app).post('/api/servers/srv1/store/git/uninstall').set(await auth(app))
+    .send({ confirm: false });
+  assert.equal(res.status, 400);
+});
+
+test('卸载 Composer 移除二进制', async () => {
+  const { app, calls } = setup({
+    'rm -f /usr/local/bin/composer': () => ({ code: 0, stdout: '', stderr: '' }),
+    default: NOT_FOUND,
+  });
+  const res = await request(app).post('/api/servers/srv1/store/composer/uninstall').set(await auth(app))
+    .send({ confirm: true });
+  assert.equal(res.status, 200);
+  assert.ok(calls.some((c) => c.includes('rm -f /usr/local/bin/composer')));
+});
+
+test('磁盘工具拒绝卸载', async () => {
+  const { app } = setup({ default: NOT_FOUND });
+  const res = await request(app).post('/api/servers/srv1/store/disk/uninstall').set(await auth(app))
+    .send({ confirm: true });
+  assert.equal(res.status, 400);
 });
 
 test('安装软件走包管理器并审计', async () => {

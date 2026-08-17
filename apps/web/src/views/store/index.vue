@@ -22,19 +22,35 @@
         <el-card class="soft-card">
           <div class="soft-head">
             <div class="soft-name">{{ item.display }}</div>
-            <el-tag v-if="item.installed" type="success" size="small">已安装</el-tag>
-            <el-tag v-else type="info" size="small">未安装</el-tag>
+            <div>
+              <el-tag v-if="item.isDefault" type="warning" size="small">默认</el-tag>
+              <el-tag v-else-if="item.installed" type="success" size="small">已安装</el-tag>
+              <el-tag v-else type="info" size="small">未安装</el-tag>
+            </div>
           </div>
           <div class="soft-desc">{{ item.desc }}</div>
           <div class="soft-version">
             <el-tag v-if="item.installed && item.version" type="info" size="small">{{ item.version }}</el-tag>
             <span v-if="item.name === 'java' && item.installed" class="java-default">默认：{{ item.defaultVersion }}</span>
+            <span v-if="item.isDefault" class="java-default">php 命令指向此版本</span>
           </div>
 
           <!-- PHP 版本 -->
           <template v-if="item.type === 'php'">
+            <div v-if="item.installed" class="php-actions">
+              <el-button
+                v-if="!item.isDefault"
+                size="small"
+                type="warning"
+                :loading="settingDefault === item.name"
+                @click="onSetPhpDefault(item)"
+              >设为默认</el-button>
+              <el-button size="small" type="danger" plain :loading="uninstalling === item.name" @click="onUninstall(item)">
+                卸载
+              </el-button>
+            </div>
             <el-button
-              v-if="!item.installed"
+              v-else
               type="primary"
               size="small"
               class="soft-btn"
@@ -45,12 +61,21 @@
 
           <!-- Java -->
           <template v-else-if="item.type === 'java'">
-            <div v-if="item.installed" class="java-switch">
+            <div v-if="item.installed" class="php-actions">
               <el-select v-model="javaVersion" size="small" placeholder="切换版本" style="width: 130px">
                 <el-option v-for="v in item.versions" :key="v" :label="`Java ${v}`" :value="v" />
               </el-select>
               <el-button size="small" type="warning" :loading="switchingJava" @click="onSwitchJava">切换</el-button>
             </div>
+            <el-button
+              v-if="item.installed"
+              size="small"
+              type="danger"
+              plain
+              class="uninstall-btn"
+              :loading="uninstalling === item.name"
+              @click="onUninstall(item)"
+            >卸载</el-button>
             <el-button
               v-else
               type="primary"
@@ -74,13 +99,30 @@
               :loading="installing === item.name"
               @click="onInstall(item)"
             >一键安装</el-button>
+            <el-button
+              v-if="item.installed"
+              size="small"
+              type="danger"
+              plain
+              class="soft-btn"
+              :loading="uninstalling === item.name"
+              @click="onUninstall(item)"
+            >卸载</el-button>
           </template>
 
           <!-- supervisor / disk 工具卡片 -->
           <template v-else-if="item.type === 'supervisor' || item.type === 'disk'">
-            <el-button type="primary" size="small" class="soft-btn" @click="openTool(item)">
-              管理
-            </el-button>
+            <div class="php-actions">
+              <el-button type="primary" size="small" @click="openTool(item)">管理</el-button>
+              <el-button
+                v-if="item.type === 'supervisor' && item.installed"
+                size="small"
+                type="danger"
+                plain
+                :loading="uninstalling === item.name"
+                @click="onUninstall(item)"
+              >卸载</el-button>
+            </div>
           </template>
 
           <!-- 普通软件 -->
@@ -93,6 +135,15 @@
               :loading="installing === item.name"
               @click="onInstall(item)"
             >一键安装</el-button>
+            <el-button
+              v-if="item.installed"
+              size="small"
+              type="danger"
+              plain
+              class="soft-btn"
+              :loading="uninstalling === item.name"
+              @click="onUninstall(item)"
+            >卸载</el-button>
           </template>
         </el-card>
       </el-col>
@@ -104,13 +155,15 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { installSoftware, listStore, switchJava, type StoreItem } from '@/api/store'
+import { installSoftware, listStore, setPhpDefault, switchJava, uninstallSoftware, type StoreItem } from '@/api/store'
 import { useServerStore } from '@/stores/server'
 
 const router = useRouter()
 const serverStore = useServerStore()
 const items = ref<StoreItem[]>([])
 const installing = ref('')
+const uninstalling = ref('')
+const settingDefault = ref('')
 const switchingJava = ref(false)
 const javaVersion = ref('')
 const loading = ref(true)
@@ -166,6 +219,41 @@ async function onSwitchJava() {
   }
 }
 
+async function onSetPhpDefault(item: StoreItem) {
+  await ElMessageBox.confirm(
+    `将把 ${item.display} 设为默认 PHP 版本（环境变量中 php 命令将指向 ${item.name}）。`,
+    '设为默认',
+    { type: 'warning', confirmButtonText: '设为默认' }
+  )
+  settingDefault.value = item.name
+  try {
+    await setPhpDefault(serverStore.currentId!, item.name)
+    ElMessage.success(`${item.display} 已是默认版本`)
+    await load()
+  } finally {
+    settingDefault.value = ''
+  }
+}
+
+async function onUninstall(item: StoreItem) {
+  const isMysql = item.name === 'mysql'
+  await ElMessageBox.confirm(
+    isMysql
+      ? `将卸载「${item.display}」。警告：卸载 MySQL 将删除数据库服务，可能影响现有站点与数据！`
+      : `确定卸载「${item.display}」吗？卸载后可通过一键安装恢复。`,
+    '卸载确认',
+    { type: 'warning', confirmButtonText: '卸载' }
+  )
+  uninstalling.value = item.name
+  try {
+    await uninstallSoftware(serverStore.currentId!, item.name, true)
+    ElMessage.success('卸载完成')
+    await load()
+  } finally {
+    uninstalling.value = ''
+  }
+}
+
 function openTool(item: StoreItem) {
   if (item.type === 'disk') {
     router.push('/disk')
@@ -181,9 +269,10 @@ function openTool(item: StoreItem) {
   .soft-head { display: flex; justify-content: space-between; align-items: center; }
   .soft-name { font-size: 18px; font-weight: 600; }
   .soft-desc { color: #909399; font-size: 13px; margin: 8px 0; min-height: 36px; }
-  .soft-version { margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .soft-version { margin-bottom: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .java-default { font-size: 12px; color: #67c23a; }
-  .java-switch { display: flex; gap: 8px; }
+  .php-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .uninstall-btn { width: 100%; margin-top: 8px; }
   .soft-btn { width: 100%; }
 }
 </style>

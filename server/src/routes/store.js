@@ -74,6 +74,23 @@ function createStoreRouter({ config, pool, store }) {
     return output.split('\n').map((l) => l.trim()).filter(Boolean);
   }
 
+  // 解析 php -v 输出版本号 → 对应条目名（如 8.1 → php81）
+  function phpNameFromVersion(output) {
+    const m = output.match(/^PHP (\d+)\.(\d+)/);
+    if (!m) return '';
+    const major = parseInt(m[1], 10);
+    const minor = parseInt(m[2], 10);
+    if (major === 7 && minor === 4) return 'php74';
+    if (major === 8) return `php8${minor}`;
+    return '';
+  }
+
+  // 设置默认 php 的命令（alternatives 切换 `php` 命令指向）
+  function setDefaultPhpCmd(phpName, pkg) {
+    if (pkg === 'apt') return `update-alternatives --set php /usr/bin/${phpName}`;
+    return `alternatives --set php /usr/bin/${phpName}`;
+  }
+
   router.get('/servers/:id/store', async (req, res) => {
     const server = findServer(req.params.id);
     if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
@@ -82,7 +99,7 @@ function createStoreRouter({ config, pool, store }) {
     try {
       const pkg = await detectPkgManager(cfg);
       // 并行检测（连接池内部限流 maxConcurrent=4）
-      const [plainResults, phpResults, supervisordOut, javaOut, altOut] = await Promise.all([
+      const [plainResults, phpResults, supervisordOut, javaOut, altOut, phpDefaultOut] = await Promise.all([
         Promise.all(PLAIN_SOFTWARE.map(async (soft) => {
           const r = await pool.run(cfg, soft.versionCmd);
           const installed = r.code === 0 && r.stdout.trim() !== '';
@@ -107,7 +124,11 @@ function createStoreRouter({ config, pool, store }) {
         pool.run(cfg, SUPERVISOR.versionCmd),
         pool.run(cfg, 'java -version 2>&1'),
         pool.run(cfg, 'alternatives --list java 2>&1'),
+        pool.run(cfg, 'php -v 2>&1'),
       ]);
+
+      // 当前默认 php 版本（PATH 中 `php` 命令指向）
+      const defaultPhp = phpDefaultOut.code === 0 ? phpNameFromVersion(phpDefaultOut.stdout) : '';
 
       const supervisorInstalled = supervisordOut.code === 0 && supervisordOut.stdout.trim() !== '';
       const javaInstalled = javaOut.code === 0 && javaOut.stdout.trim() !== '';
@@ -128,7 +149,7 @@ function createStoreRouter({ config, pool, store }) {
 
       const items = [
         ...plainResults,
-        ...phpResults,
+        ...phpResults.map((p) => ({ ...p, isDefault: p.installed && p.name === defaultPhp })),
         javaItem,
         {
           name: 'composer', display: 'Composer', desc: COMPOSER.desc, type: 'composer',
@@ -177,6 +198,13 @@ function createStoreRouter({ config, pool, store }) {
         const r = await pool.run(cfg, cmd, { timeoutMs: 600000 });
         if (r.code !== 0) throw new Error(r.stderr.slice(0, 300) || `退出码 ${r.code}`);
       }
+    }
+    // 若当前没有任何默认 php，则新安装的版本自动成为默认（PATH 中 `php` 指向）
+    const check = await pool.run(cfg, 'command -v php >/dev/null 2>&1 && echo yes || echo no');
+    if (check.stdout.trim() !== 'yes') {
+      const setCmd = setDefaultPhpCmd(php.name, pkg);
+      const r = await pool.run(cfg, setCmd);
+      if (r.code !== 0) throw new Error(`设置默认 PHP 失败: ${r.stderr.slice(0, 200)}`);
     }
   }
 
@@ -315,6 +343,87 @@ function createStoreRouter({ config, pool, store }) {
       res.json({ code: 0, data: { defaultVersion: version } });
     } catch (err) {
       res.status(502).json({ code: 502, message: `切换失败: ${err.message}` });
+    }
+  });
+
+  // 设置指定 PHP 版本为默认（PATH 中 `php` 命令指向）
+  router.post('/servers/:id/store/php/default', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const phpName = String(req.body?.version || '');
+    const php = PHP_VERSIONS.find((p) => p.name === phpName);
+    if (!php) return res.status(400).json({ code: 400, message: '无效的 PHP 版本' });
+    const cfg = sshCfg(server, res);
+    if (!cfg) return;
+    try {
+      const pkg = await detectPkgManager(cfg);
+      const r = await pool.run(cfg, setDefaultPhpCmd(php.name, pkg));
+      if (r.code !== 0) {
+        // alternatives 未注册时尝试直接建立软链
+        const ln = await pool.run(cfg, `ln -sf /usr/bin/${php.name} /usr/local/bin/php`);
+        if (ln.code !== 0) throw new Error(r.stderr.slice(0, 200) || `退出码 ${r.code}`);
+      }
+      audit(config.dataDir, { action: 'store.php.default', target: server.host, detail: php.name, result: 'success' });
+      res.json({ code: 0, data: { defaultPhp: php.name } });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `设置默认 PHP 失败: ${err.message}` });
+    }
+  });
+
+  // 卸载软件（confirm 必需）
+  router.post('/servers/:id/store/:name/uninstall', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (req.body?.confirm !== true) return res.status(400).json({ code: 400, message: '危险操作需确认（confirm: true）' });
+    const name = req.params.name;
+    if (!NAME_RE.test(name)) return res.status(400).json({ code: 400, message: '软件名不合法' });
+    const cfg = sshCfg(server, res);
+    if (!cfg) return;
+    try {
+      const pkg = await detectPkgManager(cfg);
+      let cmds = [];
+      let detail = name;
+
+      const php = PHP_VERSIONS.find((p) => p.name === name);
+      if (php) {
+        cmds = [
+          `systemctl disable --now ${php.fpm}`,
+          pkg === 'apt' ? `apt-get remove -y ${php.pkg.apt}` : `yum remove -y ${php.pkg.yum}`,
+        ];
+      } else if (name === 'composer') {
+        cmds = ['rm -f /usr/local/bin/composer'];
+      } else if (name === 'java') {
+        // 卸载当前默认版本
+        const javaOut = await pool.run(cfg, 'java -version 2>&1');
+        if (javaOut.code !== 0) return res.status(400).json({ code: 400, message: 'Java 未安装' });
+        const ver = parseJavaVersion(javaOut.stdout);
+        const verNum = ver.startsWith('1.') ? ver.slice(2) : ver;
+        const pkgName = JAVA_PKG[verNum] ? JAVA_PKG[verNum][pkg] : '';
+        if (!pkgName) return res.status(400).json({ code: 400, message: '无法确定默认 Java 版本的包名' });
+        cmds = [pkg === 'apt' ? `apt-get remove -y ${pkgName}` : `yum remove -y ${pkgName}`];
+        detail = `java-${verNum}`;
+      } else if (name === 'supervisor') {
+        cmds = [
+          'systemctl disable --now supervisord',
+          pkg === 'apt' ? 'apt-get remove -y supervisor' : 'yum remove -y supervisor',
+        ];
+      } else if (name === 'disk') {
+        return res.status(400).json({ code: 400, message: '磁盘工具无需卸载' });
+      } else {
+        const soft = PLAIN_SOFTWARE.find((s) => s.name === name);
+        if (!soft) return res.status(400).json({ code: 400, message: '未知软件' });
+        cmds = [pkg === 'apt' ? `apt-get remove -y ${soft.pkg.apt}` : `yum remove -y ${soft.pkg.yum}`];
+      }
+
+      for (const cmd of cmds) {
+        const r = await pool.run(cfg, cmd, { timeoutMs: 600000 });
+        if (r.code !== 0) throw new Error(r.stderr.slice(0, 300) || `退出码 ${r.code}`);
+      }
+      audit(config.dataDir, { action: 'store.uninstall', target: server.host, detail, result: 'success' });
+      res.json({ code: 0, data: { uninstalled: name } });
+    } catch (err) {
+      audit(config.dataDir, { action: 'store.uninstall', target: server.host, detail: name, result: 'fail', detail2: err.message });
+      res.status(502).json({ code: 502, message: `卸载失败: ${err.message}` });
     }
   });
 
