@@ -21,13 +21,14 @@
         />
         <div v-else class="toolbar">
           <el-button type="primary" @click="dbDialogVisible = true">创建数据库</el-button>
-          <span class="hint">点击「进入」查看表与数据（phpMyAdmin 风格）</span>
+          <span class="hint">点击「进入」查看表与数据</span>
         </div>
         <el-table :data="databases" v-loading="dbLoading">
           <el-table-column prop="name" label="数据库名" />
-          <el-table-column label="操作" width="220">
+          <el-table-column label="操作" width="260">
             <template #default="{ row }">
               <el-button link type="primary" @click="enterDb(row.name)">进入</el-button>
+              <el-button link type="warning" @click="openRenameDb(row.name)">改名</el-button>
               <el-button link type="danger" @click="onDropDb(row.name)">删除</el-button>
             </template>
           </el-table-column>
@@ -46,10 +47,12 @@
         </el-page-header>
         <el-table :data="tables" v-loading="tablesLoading" class="table-gap">
           <el-table-column prop="name" label="表名" />
-          <el-table-column label="操作" width="260">
+          <el-table-column label="操作" width="330">
             <template #default="{ row }">
               <el-button link type="primary" @click="enterStructure(row.name)">结构</el-button>
               <el-button link type="success" @click="enterRows(row.name)">数据</el-button>
+              <el-button link type="warning" @click="openRenameTable(row.name)">改名</el-button>
+              <el-button link @click="openTableComment(row.name)">备注</el-button>
               <el-button link type="danger" @click="onDropTable(row.name)">删除</el-button>
             </template>
           </el-table-column>
@@ -332,6 +335,43 @@
       <el-button type="primary" :loading="rowSaving" @click="onSaveRow">保存</el-button>
     </template>
   </el-dialog>
+
+  <!-- 修改库名 -->
+  <el-dialog v-model="renameDbVisible" :title="`修改库名 ${renameDbOld}`" width="min(480px, 94vw)">
+    <el-alert type="warning" show-icon :closable="false" class="alert-gap"
+      title="通过建新库并迁移全部表实现；旧库上单独授权的用户权限不会自动迁移，需要时请在新库重新授权" />
+    <el-form label-width="90px">
+      <el-form-item label="新库名" required>
+        <el-input v-model="renameDbName" placeholder="字母/数字/下划线" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="renameDbVisible = false">取消</el-button>
+      <el-button type="warning" :loading="renameDbSaving" @click="onRenameDb">确认改名</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- 修改表名 -->
+  <el-dialog v-model="renameTableVisible" :title="`修改表名 ${renameTableOld}`" width="min(480px, 94vw)">
+    <el-form label-width="90px">
+      <el-form-item label="新表名" required>
+        <el-input v-model="renameTableName" placeholder="字母/数字/下划线" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="renameTableVisible = false">取消</el-button>
+      <el-button type="primary" :loading="renameTableSaving" @click="onRenameTable">保存</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- 表备注 -->
+  <el-dialog v-model="commentVisible" :title="`表备注 ${commentTable}`" width="min(480px, 94vw)">
+    <el-input v-model="commentText" type="textarea" :rows="3" maxlength="2048" show-word-limit placeholder="留空则清除备注" />
+    <template #footer>
+      <el-button @click="commentVisible = false">取消</el-button>
+      <el-button type="primary" :loading="commentSaving" @click="onSaveComment">保存</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
@@ -340,7 +380,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   createDatabase, dropDatabase, execSql, flushRedis, getRedisInfo, listDatabases, listRedisKeys,
   listTables, tableRows, tableStructure, createTable, dropTable, addColumn, modifyColumn, dropColumn,
-  insertRow, updateRow, deleteRow, type BatchResult, type RedisInfo, type ColumnDef,
+  insertRow, updateRow, deleteRow, renameDatabase, renameTable, getTableComment, setTableComment,
+  type BatchResult, type RedisInfo, type ColumnDef,
 } from '@/api/database'
 import { useServerStore } from '@/stores/server'
 
@@ -731,6 +772,89 @@ async function onDropDb(name: string) {
   await dropDatabase(serverStore.currentId!, name, true)
   ElMessage.success('已删除（备份在服务器 /tmp/linuxmgr-db-backup/）')
   loadDatabases()
+}
+
+// ===== 修改库名 / 表名 / 表备注 =====
+const renameDbVisible = ref(false)
+const renameDbSaving = ref(false)
+const renameDbOld = ref('')
+const renameDbName = ref('')
+
+function openRenameDb(name: string) {
+  renameDbOld.value = name
+  renameDbName.value = ''
+  renameDbVisible.value = true
+}
+
+async function onRenameDb() {
+  const newName = renameDbName.value.trim()
+  if (!newName) {
+    ElMessage.warning('请填写新库名')
+    return
+  }
+  renameDbSaving.value = true
+  try {
+    const res = await renameDatabase(serverStore.currentId!, renameDbOld.value, newName, true) as unknown as { renamed: string; tables: number }
+    ElMessage.success(`已改名为 ${res.renamed}（迁移 ${res.tables} 张表）`)
+    renameDbVisible.value = false
+    loadDatabases()
+  } finally {
+    renameDbSaving.value = false
+  }
+}
+
+const renameTableVisible = ref(false)
+const renameTableSaving = ref(false)
+const renameTableOld = ref('')
+const renameTableName = ref('')
+
+function openRenameTable(name: string) {
+  renameTableOld.value = name
+  renameTableName.value = ''
+  renameTableVisible.value = true
+}
+
+async function onRenameTable() {
+  const newName = renameTableName.value.trim()
+  if (!newName) {
+    ElMessage.warning('请填写新表名')
+    return
+  }
+  renameTableSaving.value = true
+  try {
+    await renameTable(serverStore.currentId!, currentDb.value, renameTableOld.value, newName)
+    ElMessage.success('已改名')
+    renameTableVisible.value = false
+    loadTables()
+  } finally {
+    renameTableSaving.value = false
+  }
+}
+
+const commentVisible = ref(false)
+const commentSaving = ref(false)
+const commentTable = ref('')
+const commentText = ref('')
+
+async function openTableComment(name: string) {
+  commentTable.value = name
+  commentText.value = ''
+  commentVisible.value = true
+  try {
+    const res = await getTableComment(serverStore.currentId!, currentDb.value, name)
+    commentText.value = res.comment || ''
+  } catch { /* 读取失败则留空，仍可填写保存 */ }
+}
+
+async function onSaveComment() {
+  commentSaving.value = true
+  try {
+    await setTableComment(serverStore.currentId!, currentDb.value, commentTable.value, commentText.value)
+    ElMessage.success('已保存')
+    commentVisible.value = false
+  } finally {
+    commentSaving.value = false
+  }
 }
 
 async function onFlushRedis() {

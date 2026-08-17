@@ -191,7 +191,7 @@ test('切换默认 MySQL 实例（停其他启目标）', async () => {
   assert.ok(joined.includes('systemctl start mysqld'), '应启动目标实例');
 });
 
-// ===== 数据库面板（phpMyAdmin 风格）=====
+// ===== 数据库面板=====
 
 const BATCH_TABLES = 'Tables_in_app_blog\nposts\nusers\n';
 const BATCH_DESCRIBE = 'Field\tType\tNull\tKey\tDefault\tExtra\nid\tint\tNO\tPRI\tNULL\t\nname\tvarchar(255)\tYES\t\tNULL\t\n';
@@ -375,4 +375,60 @@ test('行操作非法字段名拒绝', async () => {
     .send({ where: { 'id` OR 1=1 --': '1' }, data: { title: 'x' } });
   assert.equal(res.status, 400);
   assert.ok(!calls.some((c) => c.includes('UPDATE')));
+});
+
+
+test('修改库名：建库、迁移表、删旧库', async () => {
+  const scripted = {
+    default: () => ({ code: 0, stdout: '', stderr: '' }),
+  };
+  scripted['sudo mysql -B -e "SHOW TABLES FROM \\`app_blog\\`"'] = () => ({ code: 0, stdout: 'Tables_in_app_blog\nposts\nusers\n', stderr: '' });
+  const { app, calls } = setup(scripted);
+  const res = await request(app).post('/api/servers/srv1/databases/app_blog/rename').set(await auth(app))
+    .send({ newName: 'app_blog2', confirm: true });
+  assert.equal(res.status, 200, res.body.message);
+  assert.equal(res.body.data.renamed, 'app_blog2');
+  assert.equal(res.body.data.tables, 2);
+  const joined = calls.join(' ');
+  assert.ok(joined.includes('CREATE DATABASE \\`app_blog2\\`'));
+  assert.ok(joined.includes('RENAME TABLE \\`app_blog\\`.\\`posts\\` TO \\`app_blog2\\`.\\`posts\\`, \\`app_blog\\`.\\`users\\` TO \\`app_blog2\\`.\\`users\\`'));
+  assert.ok(joined.includes('DROP DATABASE \\`app_blog\\`'));
+});
+
+test('修改库名需确认且新名合法', async () => {
+  const { app, calls } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const a = await auth(app);
+  const noConfirm = await request(app).post('/api/servers/srv1/databases/app_blog/rename').set(a)
+    .send({ newName: 'app_blog2' });
+  assert.equal(noConfirm.status, 400);
+  const badName = await request(app).post('/api/servers/srv1/databases/app_blog/rename').set(a)
+    .send({ newName: 'bad name;--', confirm: true });
+  assert.equal(badName.status, 400);
+  assert.ok(!calls.some((c) => c.includes('RENAME TABLE')));
+});
+
+test('修改表名生成 RENAME TABLE', async () => {
+  const { app, calls } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).post('/api/servers/srv1/databases/app_blog/tables/posts/rename').set(await auth(app))
+    .send({ newName: 'articles' });
+  assert.equal(res.status, 200, res.body.message);
+  assert.ok(calls.some((c) => c.includes('RENAME TABLE \\`app_blog\\`.\\`posts\\` TO \\`app_blog\\`.\\`articles\\`')));
+});
+
+test('修改表备注生成 ALTER COMMENT 并转义', async () => {
+  const { app, calls } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).put('/api/servers/srv1/databases/app_blog/tables/posts/comment').set(await auth(app))
+    .send({ comment: "文章表's" });
+  assert.equal(res.status, 200, res.body.message);
+  assert.ok(calls.some((c) => c.includes("ALTER TABLE \\`app_blog\\`.\\`posts\\` COMMENT='文章表''s'")));
+});
+
+test('读取表备注走 information_schema', async () => {
+  const { app, calls } = setup({
+    default: () => ({ code: 0, stdout: '文章表\n', stderr: '' }),
+  });
+  const res = await request(app).get('/api/servers/srv1/databases/app_blog/tables/posts/comment').set(await auth(app));
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.comment, '文章表');
+  assert.ok(calls.some((c) => c.includes('information_schema.TABLES')));
 });

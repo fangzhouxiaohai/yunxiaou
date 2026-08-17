@@ -158,6 +158,52 @@ function createDatabaseRouter({ config, pool, store }) {
     }
   });
 
+  // 修改库名：MySQL 无 RENAME DATABASE，实现为 建新库 → RENAME TABLE 逐表迁移 → 删旧库
+  router.post('/servers/:id/databases/:name/rename', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (req.body?.confirm !== true) return res.status(400).json({ code: 400, message: '危险操作需确认（confirm: true）' });
+    const oldName = req.params.name;
+    const newName = String(req.body?.newName || '');
+    if (!DB_NAME_RE.test(oldName)) return res.status(400).json({ code: 400, message: '数据库名不合法' });
+    if (!DB_NAME_RE.test(newName)) return res.status(400).json({ code: 400, message: '新数据库名不合法（字母/数字/下划线，1-64 位）' });
+    if (oldName === newName) return res.status(400).json({ code: 400, message: '新名称与原名称相同' });
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    try {
+      // 列旧库的表
+      const listCmd = mysqlBatchCmd(server, `SHOW TABLES FROM \`${oldName}\``, res);
+      if (listCmd === null) return;
+      const listR = await pool.run(cfg, listCmd);
+      if (listR.code !== 0) throw new Error(listR.stderr.slice(0, 200) || `退出码 ${listR.code}`);
+      const tables = parseBatchResult(listR.stdout).rows.map((row) => row[0]);
+      // 建新库
+      const createSql = `CREATE DATABASE \`${newName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`;
+      const createCmd = mysqlCmd(server, createSql, res);
+      if (createCmd === null) return;
+      const createR = await pool.run(cfg, createCmd);
+      if (createR.code !== 0) throw new Error(`创建新库失败: ${createR.stderr.slice(0, 200)}`);
+      // 逐表迁移（一条 RENAME TABLE 多对）
+      if (tables.length > 0) {
+        const pairs = tables.map((t) => `\`${oldName}\`.\`${t}\` TO \`${newName}\`.\`${t}\``).join(', ');
+        const renameCmd = mysqlCmd(server, `RENAME TABLE ${pairs}`, res);
+        if (renameCmd === null) return;
+        const renameR = await pool.run(cfg, renameCmd, { timeoutMs: 120000 });
+        if (renameR.code !== 0) throw new Error(`迁移表失败: ${renameR.stderr.slice(0, 200)}`);
+      }
+      // 删旧库
+      const dropCmd = mysqlCmd(server, `DROP DATABASE \`${oldName}\``, res);
+      if (dropCmd === null) return;
+      const dropR = await pool.run(cfg, dropCmd);
+      if (dropR.code !== 0) throw new Error(`删除旧库失败: ${dropR.stderr.slice(0, 200)}`);
+      audit(config.dataDir, { action: 'database.rename', target: server.host, detail: `${oldName} -> ${newName}（${tables.length} 张表）`, result: 'success' });
+      res.json({ code: 0, data: { renamed: newName, tables: tables.length } });
+    } catch (err) {
+      audit(config.dataDir, { action: 'database.rename', target: server.host, detail: `${oldName} -> ${newName}`, result: 'fail', detail2: err.message });
+      res.status(502).json({ code: 502, message: `修改库名失败: ${err.message}` });
+    }
+  });
+
   router.get('/servers/:id/redis', async (req, res) => {
     const server = findServer(req.params.id);
     if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
@@ -324,7 +370,7 @@ function createDatabaseRouter({ config, pool, store }) {
     }
   });
 
-  // ===== 数据库面板（phpMyAdmin 风格）=====
+  // ===== 数据库面板=====
 
   function validateDbAndTable(db, table, res) {
     if (!db || !DB_NAME_RE.test(db)) {
@@ -550,6 +596,56 @@ function createDatabaseRouter({ config, pool, store }) {
     const sql = `DROP TABLE \`${req.params.db}\`.\`${req.params.table}\``;
     if (await execWriteSql(server, cfg, sql, res, 'table.drop', `${req.params.db}.${req.params.table}`)) {
       res.json({ code: 0, data: { dropped: req.params.table } });
+    }
+  });
+
+  // 修改表名
+  router.post('/servers/:id/databases/:db/tables/:table/rename', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (!validateDbAndTable(req.params.db, req.params.table, res)) return;
+    const newName = String(req.body?.newName || '');
+    if (!TABLE_RE.test(newName)) return res.status(400).json({ code: 400, message: '新表名不合法（字母/数字/下划线/$，1-64 位）' });
+    if (req.params.table === newName) return res.status(400).json({ code: 400, message: '新名称与原名称相同' });
+    const sql = `RENAME TABLE \`${req.params.db}\`.\`${req.params.table}\` TO \`${req.params.db}\`.\`${newName}\``;
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    if (await execWriteSql(server, cfg, sql, res, 'table.rename', `${req.params.db}.${req.params.table} -> ${newName}`)) {
+      res.json({ code: 0, data: { renamed: newName } });
+    }
+  });
+
+  // 读取表备注（information_schema）
+  router.get('/servers/:id/databases/:db/tables/:table/comment', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (!validateDbAndTable(req.params.db, req.params.table, res)) return;
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    const sql = `SELECT TABLE_COMMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA='${sqlEscape(req.params.db)}' AND TABLE_NAME='${sqlEscape(req.params.table)}'`;
+    const cmd = mysqlCmd(server, sql, res);
+    if (cmd === null) return;
+    try {
+      const r = await pool.run(cfg, cmd);
+      if (r.code !== 0) throw new Error(r.stderr.slice(0, 200) || `退出码 ${r.code}`);
+      res.json({ code: 0, data: { comment: r.stdout.trim() } });
+    } catch (err) {
+      res.status(502).json({ code: 502, message: `读取表备注失败: ${err.message}` });
+    }
+  });
+
+  // 修改表备注
+  router.put('/servers/:id/databases/:db/tables/:table/comment', async (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (!validateDbAndTable(req.params.db, req.params.table, res)) return;
+    const comment = String(req.body?.comment ?? '');
+    if (comment.length > 2048) return res.status(400).json({ code: 400, message: '备注过长' });
+    const sql = `ALTER TABLE \`${req.params.db}\`.\`${req.params.table}\` COMMENT='${sqlEscape(comment)}'`;
+    const cfg = sshCfgOf(server, res);
+    if (cfg === null) return;
+    if (await execWriteSql(server, cfg, sql, res, 'table.comment', `${req.params.db}.${req.params.table}`)) {
+      res.json({ code: 0, data: { comment } });
     }
   });
 

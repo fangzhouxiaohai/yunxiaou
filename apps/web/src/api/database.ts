@@ -38,6 +38,11 @@ export function dropDatabase(serverId: string, name: string, confirm: boolean) {
   return request.delete(`/servers/${serverId}/databases/${name}`, { data: { confirm } })
 }
 
+export function renameDatabase(serverId: string, name: string, newName: string, confirm: boolean) {
+  // 大库迁移可能较慢，放宽超时与后端 120s 对齐
+  return request.post(`/servers/${serverId}/databases/${name}/rename`, { newName, confirm }, { timeout: 120000 })
+}
+
 export function getRedisInfo(serverId: string) {
   return request.get(`/servers/${serverId}/redis`) as Promise<RedisInfo>
 }
@@ -50,7 +55,7 @@ export function flushRedis(serverId: string, confirm: boolean) {
   return request.post(`/servers/${serverId}/redis/flush`, { confirm })
 }
 
-// ===== 数据库面板（phpMyAdmin 风格）=====
+// ===== 数据库面板=====
 
 export interface BatchResult {
   columns: string[]
@@ -94,6 +99,18 @@ export function createTable(serverId: string, db: string, payload: { table: stri
 
 export function dropTable(serverId: string, db: string, table: string, confirm: boolean) {
   return request.delete(`/servers/${serverId}/databases/${db}/tables/${table}`, { data: { confirm } })
+}
+
+export function renameTable(serverId: string, db: string, table: string, newName: string) {
+  return request.post(`/servers/${serverId}/databases/${db}/tables/${table}/rename`, { newName })
+}
+
+export function getTableComment(serverId: string, db: string, table: string) {
+  return request.get(`/servers/${serverId}/databases/${db}/tables/${table}/comment`) as Promise<{ comment: string }>
+}
+
+export function setTableComment(serverId: string, db: string, table: string, comment: string) {
+  return request.put(`/servers/${serverId}/databases/${db}/tables/${table}/comment`, { comment })
 }
 
 export function addColumn(serverId: string, db: string, table: string, payload: { column: ColumnDef; after?: string }) {
