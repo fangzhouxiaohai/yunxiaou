@@ -13,7 +13,7 @@
 | 决策点 | 选择 |
 |---|---|
 | 管理对象 | 远程 Linux 服务器（通过 SSH 连接） |
-| 功能模块 | 监控大盘、多服务器管理、网站管理、进程与服务、文件管理、安全防护 |
+| 功能模块 | 监控大盘、多服务器管理、网站管理、进程与服务、文件管理、安全防护、数据库管理、软件商店 |
 | 技术栈 | Express 后端 + Vue 3 前端（Vite + TypeScript + Element Plus + Pinia），JWT 认证 |
 | 前端风格 | 参照 [youlai/vue3-element-admin](https://gitcode.com/youlai/vue3-element-admin)：经典后台布局（左侧菜单 + 顶栏 + 多标签页），不照搬宝塔原版界面 |
 | 测试环境 | 真实 Linux 服务器 `43.240.221.112`（SSH 端口 22，用户 root）；凭据存放于 `.env`，不提交 git |
@@ -50,6 +50,17 @@
 7. **文件管理**：路径浏览、上传、下载、在线编辑、重命名、删除、chmod 权限修改。安全限制：禁止操作危险路径（`/etc/shadow`、`/etc/passwd` 等只读保护，宝塔同款防护思路）。
 8. **安全防护**：防火墙端口管理（自动识别 firewalld / ufw）、SSH 登录日志查看（`/var/log/auth.log` 或 `/var/log/secure`）、IP 封禁/解封（firewalld rich rule 或 iptables）。
 
+### P1 补充（用户新增需求，随 P1 交付）
+9. **数据库管理**：
+   - MySQL/MariaDB：数据库列表（`SHOW DATABASES`）、创建数据库、删除数据库、创建用户并授权（`CREATE USER` + `GRANT`）、导入（上传 .sql 执行）、导出（`mysqldump` 下载）。
+   - Redis：状态信息（`redis-cli INFO`：内存、连接数、命中率）、键列表（`SCAN`，分页）、键数量（`DBSIZE`）、清空当前库（`FLUSHDB`，需二次确认）。
+   - 通过 SSH 执行 mysql/redis CLI 实现，不引入数据库直连依赖。
+   - MySQL root 密码与 Redis 密码在服务器记录中可选配置（AES-256-GCM 加密存储，独立字段 `mysqlPasswordEnc` / `redisPasswordEnc`）；未配置时 MySQL 尝试 `sudo mysql`（auth_socket），Redis 尝试无密码连接。
+10. **软件商店**：收录 Nginx、MySQL/MariaDB、Redis、Docker、Node.js、Python、Git、Fail2ban 共 8 个软件：
+    - 安装状态检测（`command -v` + 版本命令，如 `nginx -v`、`node -v`）
+    - 一键安装（自动识别 apt / yum 包管理器），安装过程流式输出日志
+    - 版本查看、卸载（可选，二次确认）
+
 ## 5. 后端结构
 
 ```
@@ -75,8 +86,11 @@ server/
       processes.js           # GET /api/servers/:id/processes、POST /api/servers/:id/services/:name/:action
       files.js               # GET/POST/PUT/DELETE /api/servers/:id/files
       security.js            # GET/POST/DELETE /api/servers/:id/firewall、GET /api/servers/:id/logins
+      database.js            # GET/POST/DELETE /api/servers/:id/databases、导入导出；/api/servers/:id/redis 状态/键/清空
+      store.js               # GET /api/servers/:id/store（状态检测）、POST /api/servers/:id/store/:name/install
     utils/
       sshParser.js           # 解析 top/df/free 等命令输出为结构化数据
+      dbParser.js            # 解析 SHOW DATABASES / redis INFO 输出为结构化数据
 ```
 
 ## 6. 前端结构
@@ -99,6 +113,8 @@ apps/web/
       processes/index.vue    # 进程与服务
       files/index.vue        # 文件管理
       security/index.vue     # 安全防护
+      databases/index.vue    # 数据库管理（MySQL + Redis）
+      store/index.vue        # 软件商店
     utils/                   # 工具函数
     App.vue / main.ts
 ```
@@ -137,12 +153,14 @@ apps/web/
 5. **命令执行层黑名单**：`exec.js` 统一拦截危险命令关键字（`rm -rf /`、`mkfs`、`dd`、`shutdown`、`reboot`、`halt`、`:(){` 等），命中即拒绝执行并返回错误。
 6. **审计日志**：所有写操作（增/删/改/启停）记录到 `data/audit.log`：时间、操作人、目标服务器、操作类型、命令摘要、结果。
 7. **冒烟测试约束**：真实服务器验证时优先只读操作；测试站点使用 `linuxmgr-test.local` 域名，验证完毕后完整清理（删除站点、移除防火墙规则、清空回收站），确保服务器恢复原状。
+8. **数据库**：删除数据库前自动 `mysqldump` 备份到服务器 `/tmp/linuxmgr-db-backup/`；删除数据库、清空 Redis（`FLUSHDB`）需前端二次确认；只通过 mysql/redis CLI 操作，不修改 MySQL/Redis 全局配置文件。
+9. **软件商店**：仅通过系统包管理器（apt/yum）安装；安装/卸载前前端二次确认；禁止执行来源不明的脚本（`curl | bash`、`wget | sh` 等被 exec 黑名单拦截）。
 
 ## 9. 测试策略
 
-1. 单元测试（Node 内置 test runner）：JWT 签发/校验、AES 加解密、配置解析、sshParser 输出解析。
-2. 集成测试：mock SSH 客户端（`ssh2` 接口替身）跑通监控、站点、文件等模块逻辑。
-3. 冒烟验证：真实服务器 `43.240.221.112`（root，凭据在 `.env`），端到端验证登录 → 添加服务器 → 监控大盘 → 网站管理全流程；遵守 8.1 第 7 条约束，验证后完整清理测试痕迹。
+1. 单元测试（Node 内置 test runner）：JWT 签发/校验、AES 加解密、配置解析、sshParser / dbParser 输出解析。
+2. 集成测试：mock SSH 客户端（`ssh2` 接口替身）跑通监控、数据库、软件商店等模块逻辑。
+3. 冒烟验证：真实服务器 `43.240.221.112`（root，凭据在 `.env`），端到端验证登录 → 添加服务器 → 监控大盘 → 数据库列表（只读）→ 软件状态检测（只读）→ 网站管理全流程；遵守 8.1 第 7 条约束，验证后完整清理测试痕迹。
 
 ## 10. 运行方式
 
@@ -162,7 +180,7 @@ npm run dev   # Vite dev server（端口 5173），代理 /api 到后端（3000�
 ## 11. 范围外（第一版不做）
 
 - 多用户/角色权限系统（单管理员）
-- 数据库管理（MySQL/Redis 管理）
-- 软件商店、Docker 管理
+- Docker 容器管理（软件商店提供 Docker 安装，容器编排不在范围）
 - FTP 管理
 - 面板自身的自动更新
+- PostgreSQL 数据库管理
