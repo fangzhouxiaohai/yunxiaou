@@ -2,6 +2,7 @@ const express = require('express');
 const { decrypt } = require('../crypto/cipher');
 const { audit } = require('../utils/audit');
 const { assertCommandSafe } = require('../ssh/exec');
+const { applyVhost, REWRITE_PRESETS, PHP_SOCK } = require('../utils/vhost');
 
 const NAME_RE = /^[a-zA-Z0-9_-]{1,32}$/;
 const DIR_RE = /^\/[a-zA-Z0-9_/.-]{1,200}$/;
@@ -9,14 +10,6 @@ const DOMAIN_RE = /^[a-zA-Z0-9.-]{1,100}$/;
 const TYPES = ['php', 'node', 'python', 'java'];
 const ACTIONS = ['start', 'stop', 'restart'];
 const PROTECTED_DIRS = ['/', '/etc', '/var', '/usr', '/boot', '/home', '/root', '/tmp', '/dev', '/proc', '/sys', '/run', '/opt', '/srv'];
-
-const PHP_SOCK = {
-  php74: '/var/run/php74-php-fpm.sock',
-  php80: '/var/run/php80-php-fpm.sock',
-  php81: '/var/run/php81-php-fpm.sock',
-  php82: '/var/run/php82-php-fpm.sock',
-  php83: '/var/run/php83-php-fpm.sock',
-};
 
 function createProjectsRouter({ config, pool, store, projectStore }) {
   const router = express.Router();
@@ -51,24 +44,6 @@ User=root
 WantedBy=multi-user.target`;
   }
 
-  function nginxVhost(name, dir, port, sock, domain) {
-    // 单引号 heredoc 保证 $uri 等不被 bash 展开
-    const serverName = domain || `linuxmgr-${name}.local`;
-    return `server {
-    listen ${port};
-    server_name ${serverName};
-    root ${dir};
-    index index.php index.html;
-    location / { try_files $uri $uri/ =404; }
-    location ~ \\.php$ {
-        fastcgi_pass unix:${sock};
-        fastcgi_index index.php;
-        include fastcgi_params;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-    }
-}`;
-  }
-
   router.get('/servers/:id/projects', async (req, res) => {
     const server = findServer(req.params.id);
     if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
@@ -101,6 +76,9 @@ WantedBy=multi-user.target`;
     if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535) return res.status(400).json({ code: 400, message: '端口必须为 1-65535' });
     if (type !== 'php' && (!entry || entry.trim().length > 500)) return res.status(400).json({ code: 400, message: '启动命令不合法' });
     if (type === 'php' && !PHP_SOCK[phpVersion]) return res.status(400).json({ code: 400, message: '请选择有效的 PHP 版本' });
+    if (type === 'php' && req.body.rewritePreset && !REWRITE_PRESETS[req.body.rewritePreset]) {
+      return res.status(400).json({ code: 400, message: '伪静态预设不合法' });
+    }
     if (type !== 'php') {
       try {
         assertCommandSafe(entry);
@@ -116,15 +94,13 @@ WantedBy=multi-user.target`;
       if (mkdir.code !== 0) throw new Error(mkdir.stderr.slice(0, 200));
 
       if (type === 'php') {
-        const vhost = nginxVhost(name, directory, portNum, PHP_SOCK[phpVersion], domain);
-        const writeCmd = `cat > /etc/nginx/conf.d/linuxmgr-${name}.conf <<'LINUXMGR_EOF'\n${vhost}\nLINUXMGR_EOF`;
-        const w = await pool.run(cfg, writeCmd);
-        if (w.code !== 0) throw new Error(`写入 vhost 失败: ${w.stderr.slice(0, 200)}`);
-        const t = await pool.run(cfg, `nginx -t && nginx -s reload`);
-        if (t.code !== 0) {
-          await pool.run(cfg, `rm -f /etc/nginx/conf.d/linuxmgr-${name}.conf`);
-          throw new Error(`Nginx 配置校验失败: ${t.stderr.slice(0, 200)}`);
-        }
+        const project0 = {
+          name: fullName, type, directory, port: portNum,
+          phpVersion, domain: domain || undefined,
+          domains: domain ? [domain] : [],
+          rewrite: { preset: req.body.rewritePreset || 'none' },
+        };
+        await applyVhost({ pool }, cfg, project0);
       } else {
         const unit = systemdUnit(name, directory, entry.trim(), portNum);
         const writeCmd = `cat > /etc/systemd/system/linuxmgr-${name}.service <<'LINUXMGR_EOF'\n${unit}\nLINUXMGR_EOF`;
@@ -144,6 +120,8 @@ WantedBy=multi-user.target`;
         entry: type === 'php' ? '' : entry.trim(),
         phpVersion: type === 'php' ? phpVersion : undefined,
         domain: domain || undefined,
+        domains: domain ? [domain] : [],
+        rewrite: type === 'php' ? { preset: req.body.rewritePreset || 'none' } : undefined,
         createdAt: new Date().toISOString(),
       };
       const list = projectStore.read();
@@ -194,13 +172,14 @@ WantedBy=multi-user.target`;
     if (!cfg) return;
     try {
       const cmds = [`systemctl stop ${name}`, `systemctl disable ${name}`];
-      if (project.type === 'php') {
-        cmds.push(
-          `mkdir -p /tmp/linuxmgr-backup && cp /etc/nginx/conf.d/linuxmgr-${name.replace('linuxmgr-', '')}.conf /tmp/linuxmgr-backup/ 2>/dev/null || true`,
-          `rm -f /etc/nginx/conf.d/linuxmgr-${name.replace('linuxmgr-', '')}.conf`,
-          'nginx -s reload'
-        );
-      } else {
+      const vhostName = name.replace('linuxmgr-', '');
+      cmds.push(
+        `mkdir -p /tmp/linuxmgr-backup && cp /etc/nginx/conf.d/linuxmgr-${vhostName}.conf /tmp/linuxmgr-backup/ 2>/dev/null || true`,
+        `rm -f /etc/nginx/conf.d/linuxmgr-${vhostName}.conf`,
+        `rm -f /etc/nginx/linuxmgr-htpasswd-${name}`,
+        'nginx -s reload'
+      );
+      if (project.type !== 'php') {
         cmds.push(`rm -f /etc/systemd/system/${name}.service`);
       }
       cmds.push('systemctl daemon-reload');

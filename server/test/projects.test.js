@@ -133,3 +133,20 @@ test('项目日志', async () => {
   assert.equal(res.status, 200);
   assert.ok(res.body.data.includes('line1'));
 });
+
+test('创建 PHP 项目带伪静态预设', async () => {
+  const { app, calls } = setup({ default: OK });
+  const res = await request(app).post('/api/servers/srv1/projects').set(await auth(app))
+    .send({ name: 'tp5', type: 'php', directory: '/www/tp5', port: 8081, phpVersion: 'php74', rewritePreset: 'thinkphp' });
+  assert.equal(res.status, 200);
+  const joined = calls.join(' ');
+  assert.ok(joined.includes('/index.php?s=$1'), 'vhost 应含 thinkphp 伪静态');
+  assert.ok(joined.includes('linuxmgr-tp5.access.log'), 'vhost 应含专属日志');
+});
+
+test('创建 PHP 项目传非法伪静态预设返回 400', async () => {
+  const { app } = setup({ default: OK });
+  const res = await request(app).post('/api/servers/srv1/projects').set(await auth(app))
+    .send({ name: 'bad', type: 'php', directory: '/www/bad', port: 8082, phpVersion: 'php74', rewritePreset: 'evil' });
+  assert.equal(res.status, 400);
+});
