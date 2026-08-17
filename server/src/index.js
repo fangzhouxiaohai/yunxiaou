@@ -13,6 +13,7 @@ const createDatabaseRouter = require('./routes/database');
 const createStoreRouter = require('./routes/store');
 const createSupervisorRouter = require('./routes/supervisor');
 const createDiskRouter = require('./routes/disk');
+const createProjectsRouter = require('./routes/projects');
 
 function createApp({ config, pool, stores }) {
   const app = express();
@@ -24,6 +25,7 @@ function createApp({ config, pool, stores }) {
   app.use('/api', requireAuth(config), createStoreRouter({ config, pool, store: stores.servers }));
   app.use('/api', requireAuth(config), createSupervisorRouter({ config, pool, store: stores.servers }));
   app.use('/api', requireAuth(config), createDiskRouter({ config, pool, store: stores.servers }));
+  app.use('/api', requireAuth(config), createProjectsRouter({ config, pool, store: stores.servers, projectStore: stores.projects }));
   app.use('/api/servers', requireAuth(config), createServersRouter({ config, pool, store: stores.servers }));
 
   const webDist = path.join(__dirname, '..', '..', 'apps', 'web', 'dist');
@@ -48,6 +50,7 @@ function start() {
   const pool = new ConnectionPool({});
   const stores = {
     servers: new JsonStore(config.dataDir, 'servers.json', []),
+    projects: new JsonStore(config.dataDir, 'projects.json', []),
   };
   const app = createApp({ config, pool, stores });
   app.listen(config.port, () => console.log(`linuxmgr server listening on http://localhost:${config.port}`));
