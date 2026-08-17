@@ -11,7 +11,7 @@ export interface FileItem {
 }
 
 export function listFiles(serverId: string, path: string) {
-  return request.get(`/servers/${serverId}/files`, { params: { path } }) as Promise<{ path: string; items: FileItem[] }>
+  return request.get(`/servers/${serverId}/files`, { params: { path } }) as Promise<{ path: string; items: FileItem[]; error?: string }>
 }
 
 export function readFile(serverId: string, path: string) {

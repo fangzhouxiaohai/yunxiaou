@@ -152,6 +152,20 @@ test('切换 Java 默认版本走 alternatives', async () => {
   assert.ok(joined.includes('java-11-openjdk'), '应切换到 11 版本路径');
 });
 
+test('安装 Supervisor 走 EPEL 源并启用服务', async () => {
+  const { app, calls } = setup({
+    'rpm -q epel-release >/dev/null 2>&1 || yum install -y epel-release': () => ({ code: 0, stdout: '', stderr: '' }),
+    'yum install -y supervisor': () => ({ code: 0, stdout: '', stderr: '' }),
+    'systemctl enable --now supervisord': () => ({ code: 0, stdout: '', stderr: '' }),
+    default: NOT_FOUND,
+  });
+  const res = await request(app).post('/api/servers/srv1/store/supervisor/install').set(await auth(app));
+  assert.equal(res.status, 200);
+  const joined = calls.join(' ');
+  assert.ok(joined.includes('epel-release'), 'CentOS 应先装 EPEL 源');
+  assert.ok(joined.includes('supervisord'), '应启用 supervisord 服务');
+});
+
 test('未知软件名拒绝安装', async () => {
   const { app } = setup({ default: NOT_FOUND });
   const res = await request(app).post('/api/servers/srv1/store/evil-tool/install').set(await auth(app));

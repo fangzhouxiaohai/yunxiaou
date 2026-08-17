@@ -5,6 +5,9 @@
   <div v-else>
     <el-card>
       <div class="toolbar">
+        <el-input v-model="pathInput" class="path-input" placeholder="输入路径回车跳转，如 /www 或 /root" @keyup.enter="jumpTo">
+          <template #prepend>/</template>
+        </el-input>
         <el-breadcrumb separator="/">
           <el-breadcrumb-item v-for="(seg, i) in crumbs" :key="i" @click="goTo(i)">
             <a href="javascript:;" @click.prevent="goTo(i)">{{ seg }}</a>
@@ -15,6 +18,14 @@
           <el-button size="small" @click="load">刷新</el-button>
         </div>
       </div>
+      <el-alert
+        v-if="listError"
+        :title="listError"
+        type="warning"
+        show-icon
+        :closable="false"
+        class="alert-gap"
+      />
       <el-table :data="items" v-loading="loading" size="small">
         <el-table-column label="名称" min-width="220">
           <template #default="{ row }">
@@ -88,9 +99,11 @@ import {
 import { useServerStore } from '@/stores/server'
 
 const serverStore = useServerStore()
-const currentPath = ref('/www')
+const currentPath = ref('/')
+const pathInput = ref('')
 const items = ref<FileItem[]>([])
 const loading = ref(false)
+const listError = ref('')
 const saving = ref(false)
 const viewDialog = ref(false)
 const fileContent = ref('')
@@ -117,9 +130,18 @@ async function load() {
   try {
     const data = await listFiles(serverStore.currentId, currentPath.value)
     items.value = data.items
+    listError.value = data.error || ''
+    pathInput.value = currentPath.value
   } finally {
     loading.value = false
   }
+}
+
+function jumpTo() {
+  const p = pathInput.value.trim()
+  if (!p.startsWith('/')) return
+  currentPath.value = p.replace(/\/+/g, '/')
+  load()
 }
 
 function goTo(index: number) {
@@ -203,6 +225,8 @@ onMounted(load)
 </script>
 
 <style scoped lang="scss">
-.toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; }
+.path-input { width: 320px; }
+.alert-gap { margin-bottom: 12px; }
 .file-content { background: #0d1117; color: #c9d1d9; padding: 16px; border-radius: 6px; font-size: 12px; max-height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-all; }
 </style>

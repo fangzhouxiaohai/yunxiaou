@@ -49,13 +49,16 @@ function createFilesRouter({ config, pool, store }) {
   router.get('/servers/:id/files', async (req, res) => {
     const server = findServer(req.params.id);
     if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
-    const dir = String(req.query.path || '/www');
+    const dir = String(req.query.path || '/');
     if (!validPath(dir)) return res.status(400).json({ code: 400, message: '路径不合法' });
     const cfg = sshCfg(server, res);
     if (!cfg) return;
     try {
       const r = await pool.run(cfg, `ls -la --time-style=long-iso ${dir}`);
-      if (r.code !== 0) throw new Error(r.stderr.slice(0, 200) || `退出码 ${r.code}`);
+      if (r.code !== 0) {
+        // 目录不存在/无权限 → 结构化容错而非报错
+        return res.json({ code: 0, data: { path: dir, items: [], error: r.stderr.trim() || '目录不存在或无法访问' } });
+      }
       res.json({ code: 0, data: { path: dir, items: parseLs(r.stdout) } });
     } catch (err) {
       res.status(502).json({ code: 502, message: `读取目录失败: ${err.message}` });

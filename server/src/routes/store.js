@@ -263,7 +263,27 @@ function createStoreRouter({ config, pool, store }) {
         return res.status(400).json({ code: 400, message: '磁盘工具无需安装' });
       }
 
-      const soft = [...PLAIN_SOFTWARE, SUPERVISOR].find((s) => s.name === name);
+      if (name === 'supervisor') {
+        // CentOS/RHEL 7 的 supervisor 包在 EPEL 源：先确保 epel-release
+        const steps = pkg === 'apt'
+          ? [
+              'apt-get install -y supervisor',
+              'systemctl enable --now supervisor',
+            ]
+          : [
+              'rpm -q epel-release >/dev/null 2>&1 || yum install -y epel-release',
+              'yum install -y supervisor',
+              'systemctl enable --now supervisord',
+            ];
+        for (const cmd of steps) {
+          const r = await pool.run(cfg, cmd, { timeoutMs: 600000 });
+          if (r.code !== 0) throw new Error(r.stderr.slice(0, 300) || `退出码 ${r.code}`);
+        }
+        audit(config.dataDir, { action: 'store.install', target: server.host, detail: 'supervisor', result: 'success' });
+        return res.json({ code: 0, data: { installed: 'supervisor' } });
+      }
+
+      const soft = PLAIN_SOFTWARE.find((s) => s.name === name);
       if (!soft) return res.status(400).json({ code: 400, message: '未知软件' });
       const installCmd = pkg === 'apt'
         ? `DEBIAN_FRONTEND=noninteractive apt-get install -y ${soft.pkg.apt}`

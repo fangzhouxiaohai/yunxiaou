@@ -54,6 +54,17 @@ test('文件列表解析', async () => {
   assert.equal(res.body.data.items[1].size, 1234);
 });
 
+test('目录不存在时返回结构化容错而非报错', async () => {
+  const { app } = setup({
+    'ls -la --time-style=long-iso /nope': () => ({ code: 2, stdout: '', stderr: 'ls: cannot access /nope: No such file or directory' }),
+    default: () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+  const res = await request(app).get('/api/servers/srv1/files?path=/nope').set(await auth(app));
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.data.items, []);
+  assert.ok(res.body.data.error.includes('No such file'));
+});
+
 test('读取受保护文件拒绝', async () => {
   const { app } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
   const res = await request(app).post('/api/servers/srv1/files/read').set(await auth(app))
