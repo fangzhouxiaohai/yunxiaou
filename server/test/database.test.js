@@ -52,8 +52,52 @@ test('数据库列表', async () => {
   const res = await request(app).get('/api/servers/srv1/databases').set(await auth(app));
   assert.equal(res.status, 200);
   assert.equal(res.body.data.available, true);
-  assert.ok(res.body.data.databases.includes('app_blog'));
+  assert.ok(res.body.data.databases.some((d) => d.name === 'app_blog' && d.comment === ''));
   assert.ok(calls.some((c) => c.includes('SHOW DATABASES')));
+});
+
+test('库备注：设置后列表返回，清空后删除', async () => {
+  const { app, stores } = setup({
+    default: () => ({ code: 0, stdout: DB_OUTPUT, stderr: '' }),
+  });
+  const headers = await auth(app);
+  const put = await request(app).put('/api/servers/srv1/databases/app_blog/comment').set(headers)
+    .send({ comment: '博客主库' });
+  assert.equal(put.status, 200);
+  const res = await request(app).get('/api/servers/srv1/databases').set(headers);
+  assert.equal(res.body.data.databases.find((d) => d.name === 'app_blog').comment, '博客主库');
+  // 清空备注
+  const clear = await request(app).put('/api/servers/srv1/databases/app_blog/comment').set(headers)
+    .send({ comment: '' });
+  assert.equal(clear.status, 200);
+  const srv = stores.servers.read().find((s) => s.id === 'srv1');
+  assert.equal(srv.dbComments.app_blog, undefined);
+});
+
+test('库备注：改名随迁、删库清理', async () => {
+  const { app, stores } = setup({
+    default: () => ({ code: 0, stdout: 'Tables_in_app_blog\nposts\n', stderr: '' }),
+  });
+  const headers = await auth(app);
+  await request(app).put('/api/servers/srv1/databases/app_blog/comment').set(headers).send({ comment: '博客主库' });
+  const rename = await request(app).post('/api/servers/srv1/databases/app_blog/rename').set(headers)
+    .send({ newName: 'app_blog2', confirm: true });
+  assert.equal(rename.status, 200);
+  let srv = stores.servers.read().find((s) => s.id === 'srv1');
+  assert.equal(srv.dbComments.app_blog2, '博客主库');
+  assert.equal(srv.dbComments.app_blog, undefined);
+  const drop = await request(app).delete('/api/servers/srv1/databases/app_blog2').set(headers)
+    .send({ confirm: true });
+  assert.equal(drop.status, 200);
+  srv = stores.servers.read().find((s) => s.id === 'srv1');
+  assert.equal(srv.dbComments.app_blog2, undefined);
+});
+
+test('库备注：超长拒绝', async () => {
+  const { app } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) });
+  const res = await request(app).put('/api/servers/srv1/databases/app_blog/comment').set(await auth(app))
+    .send({ comment: 'x'.repeat(256) });
+  assert.equal(res.status, 400);
 });
 
 test('MySQL 未安装时返回 unavailable 而非报错', async () => {

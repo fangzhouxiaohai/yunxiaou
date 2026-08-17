@@ -1,8 +1,21 @@
 <template>
   <el-container class="layout">
-    <el-aside v-if="!isMobile" width="220px" class="aside">
-      <div class="logo">云小U</div>
-      <SideMenu />
+    <el-aside v-if="!isMobile" :width="collapsed ? '64px' : '220px'" class="aside">
+      <div class="logo-row" :class="{ collapsed }">
+        <div class="brand">
+          <BrandLogo :size="26" />
+          <span v-if="!collapsed" class="brand-name">云小U</span>
+        </div>
+        <el-icon
+          class="collapse-btn"
+          :title="collapsed ? '展开菜单' : '折叠菜单'"
+          @click="toggleCollapse"
+        >
+          <Expand v-if="collapsed" />
+          <Fold v-else />
+        </el-icon>
+      </div>
+      <SideMenu :collapsed="collapsed" />
     </el-aside>
     <el-drawer
       v-model="drawerVisible"
@@ -11,7 +24,12 @@
       size="220px"
       class="menu-drawer"
     >
-      <div class="logo">云小U</div>
+      <div class="logo-row drawer-brand">
+        <div class="brand">
+          <BrandLogo :size="26" />
+          <span class="brand-name">云小U</span>
+        </div>
+      </div>
       <SideMenu @select="drawerVisible = false" />
     </el-drawer>
     <el-container>
@@ -82,11 +100,12 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Expand, Sunny, Moon, User, ArrowDown } from '@element-plus/icons-vue'
+import { Expand, Fold, Sunny, Moon, User, ArrowDown } from '@element-plus/icons-vue'
 import SideMenu from './SideMenu.vue'
+import BrandLogo from './BrandLogo.vue'
 import { useServerStore } from '@/stores/server'
 import { useUserStore } from '@/stores/user'
 import { useThemeStore } from '@/stores/theme'
@@ -96,6 +115,13 @@ const router = useRouter()
 const serverStore = useServerStore()
 const userStore = useUserStore()
 const themeStore = useThemeStore()
+
+// 桌面端菜单折叠状态，localStorage 持久化
+const collapsed = ref(localStorage.getItem('menu-collapsed') === '1')
+watch(collapsed, (v) => localStorage.setItem('menu-collapsed', v ? '1' : '0'))
+function toggleCollapse() {
+  collapsed.value = !collapsed.value
+}
 
 const drawerVisible = ref(false)
 const isMobile = ref(window.matchMedia('(max-width: 1023px)').matches)
@@ -157,16 +183,38 @@ async function onChangePassword() {
 .layout { height: 100%; }
 .aside {
   background: linear-gradient(180deg, var(--aside-bg), var(--aside-bg-2));
-  .logo {
-    height: 56px;
-    line-height: 56px;
-    text-align: center;
+  transition: width 0.2s ease;
+  overflow: hidden;
+}
+.logo-row {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 4px;
+  .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .brand-name {
     color: #fff;
     font-size: 19px;
     font-weight: 600;
     letter-spacing: 1px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    margin-bottom: 4px;
+    white-space: nowrap;
+  }
+  .collapse-btn {
+    font-size: 18px;
+    color: rgba(255, 255, 255, 0.65);
+    cursor: pointer;
+    flex-shrink: 0;
+    &:hover { color: #fff; }
+  }
+  &.collapsed {
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    height: auto;
+    padding: 10px 0;
   }
 }
 .header {
@@ -206,16 +254,21 @@ async function onChangePassword() {
 .menu-drawer {
   --el-drawer-bg-color: var(--aside-bg);
   background: linear-gradient(180deg, var(--aside-bg), var(--aside-bg-2));
-  .logo {
+  .drawer-brand { justify-content: center; }
+  .logo-row {
     height: 56px;
-    line-height: 56px;
-    text-align: center;
-    color: #fff;
-    font-size: 19px;
-    font-weight: 600;
-    letter-spacing: 1px;
+    display: flex;
+    align-items: center;
+    padding: 0 12px 0 16px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     margin-bottom: 4px;
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand-name {
+      color: #fff;
+      font-size: 19px;
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
   }
 }
 </style>

@@ -2,7 +2,7 @@ import request from './request'
 
 export interface DbListResult {
   available: boolean
-  databases?: string[]
+  databases?: Array<{ name: string; comment: string }>
   message?: string
 }
 
@@ -41,6 +41,10 @@ export function dropDatabase(serverId: string, name: string, confirm: boolean) {
 export function renameDatabase(serverId: string, name: string, newName: string, confirm: boolean) {
   // 大库迁移可能较慢，放宽超时与后端 120s 对齐
   return request.post(`/servers/${serverId}/databases/${name}/rename`, { newName, confirm }, { timeout: 120000 })
+}
+
+export function setDatabaseComment(serverId: string, name: string, comment: string) {
+  return request.put(`/servers/${serverId}/databases/${name}/comment`, { comment })
 }
 
 export function getRootPassword(serverId: string) {

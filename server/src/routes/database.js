@@ -99,7 +99,10 @@ function createDatabaseRouter({ config, pool, store }) {
           data: { available: false, message: result.stderr.trim() || 'MySQL 未安装或未运行' },
         });
       }
-      res.json({ code: 0, data: { available: true, databases: parseDatabases(result.stdout) } });
+      // MySQL 不支持库级 COMMENT，备注存面板端服务器记录（dbComments），随列表一起返回
+      const comments = server.dbComments || {};
+      const databases = parseDatabases(result.stdout).map((name) => ({ name, comment: comments[name] || '' }));
+      res.json({ code: 0, data: { available: true, databases } });
     } catch (err) {
       res.status(502).json({ code: 502, message: `获取数据库列表失败: ${err.message}` });
     }
@@ -152,6 +155,15 @@ function createDatabaseRouter({ config, pool, store }) {
       const cmd = mysqlCmd(server, `DROP DATABASE \`${name}\``, res);
       const drop = await pool.run(cfg, cmd);
       if (drop.code !== 0) throw new Error(drop.stderr.slice(0, 200));
+      // 清理面板端保存的库备注
+      if (server.dbComments && server.dbComments[name] !== undefined) {
+        const list = store.read();
+        const target = list.find((s) => s.id === server.id);
+        if (target && target.dbComments) {
+          delete target.dbComments[name];
+          store.write(list);
+        }
+      }
       audit(config.dataDir, { action: 'database.drop', target: server.host, detail: name, result: 'success' });
       res.json({ code: 0, data: { dropped: name } });
     } catch (err) {
@@ -197,12 +209,40 @@ function createDatabaseRouter({ config, pool, store }) {
       if (dropCmd === null) return;
       const dropR = await pool.run(cfg, dropCmd);
       if (dropR.code !== 0) throw new Error(`删除旧库失败: ${dropR.stderr.slice(0, 200)}`);
+      // 面板端库备注随迁移动到新库名
+      if (server.dbComments && server.dbComments[oldName] !== undefined) {
+        const list = store.read();
+        const target = list.find((s) => s.id === server.id);
+        if (target && target.dbComments) {
+          target.dbComments[newName] = target.dbComments[oldName];
+          delete target.dbComments[oldName];
+          store.write(list);
+        }
+      }
       audit(config.dataDir, { action: 'database.rename', target: server.host, detail: `${oldName} -> ${newName}（${tables.length} 张表）`, result: 'success' });
       res.json({ code: 0, data: { renamed: newName, tables: tables.length } });
     } catch (err) {
       audit(config.dataDir, { action: 'database.rename', target: server.host, detail: `${oldName} -> ${newName}`, result: 'fail', detail2: err.message });
       res.status(502).json({ code: 502, message: `修改库名失败: ${err.message}` });
     }
+  });
+
+  // 库备注：存面板端服务器记录（MySQL 本身不支持库级 COMMENT）
+  router.put('/servers/:id/databases/:name/comment', (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    const name = req.params.name;
+    if (!DB_NAME_RE.test(name)) return res.status(400).json({ code: 400, message: '数据库名不合法' });
+    const comment = String(req.body?.comment ?? '').trim();
+    if (comment.length > 255) return res.status(400).json({ code: 400, message: '备注最长 255 字符' });
+    const list = store.read();
+    const target = list.find((s) => s.id === server.id);
+    if (!target) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (!target.dbComments) target.dbComments = {};
+    if (comment) target.dbComments[name] = comment;
+    else delete target.dbComments[name];
+    store.write(list);
+    res.json({ code: 0, data: { name, comment } });
   });
 
   router.get('/servers/:id/redis', async (req, res) => {

@@ -26,10 +26,16 @@
         </div>
         <el-table :data="databases" v-loading="dbLoading">
           <el-table-column prop="name" label="数据库名" />
-          <el-table-column label="操作" width="260">
+          <el-table-column label="备注">
+            <template #default="{ row }">
+              <span class="db-comment">{{ row.comment || '—' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="330">
             <template #default="{ row }">
               <el-button link type="primary" @click="enterDb(row.name)">进入</el-button>
               <el-button link type="warning" @click="openRenameDb(row.name)">改名</el-button>
+              <el-button link type="warning" @click="openDbComment(row)">备注</el-button>
               <el-button link type="danger" @click="onDropDb(row.name)">删除</el-button>
             </template>
           </el-table-column>
@@ -397,6 +403,15 @@
     </template>
   </el-dialog>
 
+  <!-- 库备注 -->
+  <el-dialog v-model="dbCommentVisible" :title="`数据库备注 ${dbCommentName}`" width="min(480px, 94vw)">
+    <el-input v-model="dbCommentText" type="textarea" :rows="3" maxlength="255" show-word-limit placeholder="留空则清除备注（备注仅保存在面板，不写入 MySQL）" />
+    <template #footer>
+      <el-button @click="dbCommentVisible = false">取消</el-button>
+      <el-button type="primary" :loading="dbCommentSaving" @click="onSaveDbComment">保存</el-button>
+    </template>
+  </el-dialog>
+
   <!-- Root 密码 -->
   <el-dialog v-model="rootPwdVisible" title="MySQL Root 密码" width="min(520px, 94vw)">
     <el-form label-width="110px">
@@ -428,7 +443,7 @@ import {
   createDatabase, dropDatabase, execSql, flushRedis, getRedisInfo, listDatabases, listRedisKeys,
   listTables, tableRows, tableStructure, createTable, dropTable, addColumn, modifyColumn, dropColumn,
   insertRow, updateRow, deleteRow, renameDatabase, renameTable, getTableComment, setTableComment,
-  getRootPassword, resetRootPassword,
+  getRootPassword, resetRootPassword, setDatabaseComment,
   type BatchResult, type RedisInfo, type ColumnDef, type TableInfo,
 } from '@/api/database'
 import { useServerStore } from '@/stores/server'
@@ -446,7 +461,7 @@ const COLUMN_TYPES = ['int', 'bigint', 'smallint', 'tinyint', 'varchar', 'char',
 // ===== MySQL 面板 =====
 type DbView = 'list' | 'explorer' | 'sql'
 const dbView = ref<DbView>('list')
-const databases = ref<Array<{ name: string }>>([])
+const databases = ref<Array<{ name: string; comment: string }>>([])
 const dbLoading = ref(false)
 const dbDialogVisible = ref(false)
 const dbSaving = ref(false)
@@ -486,7 +501,7 @@ async function loadDatabases() {
       return
     }
     mysqlUnavailable.value = false
-    databases.value = (result.databases || []).map((name) => ({ name }))
+    databases.value = result.databases || []
   } finally {
     dbLoading.value = false
   }
@@ -1029,6 +1044,31 @@ async function onSaveComment() {
   }
 }
 
+// ===== 库备注（面板端存储）=====
+const dbCommentVisible = ref(false)
+const dbCommentSaving = ref(false)
+const dbCommentName = ref('')
+const dbCommentText = ref('')
+
+function openDbComment(row: { name: string; comment: string }) {
+  dbCommentName.value = row.name
+  dbCommentText.value = row.comment || ''
+  dbCommentVisible.value = true
+}
+
+async function onSaveDbComment() {
+  dbCommentSaving.value = true
+  try {
+    await setDatabaseComment(serverStore.currentId!, dbCommentName.value, dbCommentText.value.trim())
+    const row = databases.value.find((d) => d.name === dbCommentName.value)
+    if (row) row.comment = dbCommentText.value.trim()
+    ElMessage.success('已保存')
+    dbCommentVisible.value = false
+  } finally {
+    dbCommentSaving.value = false
+  }
+}
+
 async function onFlushRedis() {
   await ElMessageBox.confirm('将清空当前 Redis 库的所有键，不可恢复。', '清空 Redis', { type: 'warning' })
   const loading = fullLoading('正在清空 Redis...')
@@ -1045,6 +1085,7 @@ async function onFlushRedis() {
 <style scoped lang="scss">
 .toolbar { margin-bottom: 16px; display: flex; align-items: center; gap: 12px; }
 .hint { font-size: 12px; color: #909399; }
+.db-comment { font-size: 13px; color: var(--text-2, #606266); }
 .alert-gap { margin-bottom: 16px; }
 .row-gap { margin-top: 16px; }
 .db-page-header { margin-bottom: 16px; }
