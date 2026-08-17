@@ -1,4 +1,4 @@
-# 云小U 服务器管理工具（宝塔风格）设计文档
+# 云小U 服务器管理工具设计文档
 
 - 日期：2026-08-17
 - 状态：已批准（用户确认）
@@ -7,7 +7,7 @@
 
 ## 1. 目标
 
-在 `D:\yewu\linuxmgr` 目录下从零构建一个宝塔（BaoTa）风格的服务器管理 Web 工具（产品名：**云小U**），通过 SSH 管理真实的远程 Linux 服务器。
+在 `D:\yewu\linuxmgr` 目录下从零构建一个服务器管理 Web 工具（产品名：**云小U**），通过 SSH 管理真实的远程 Linux 服务器。
 
 ## 2. 关键决策（用户已确认）
 
@@ -16,7 +16,7 @@
 | 管理对象 | 远程 Linux 服务器（通过 SSH 连接） |
 | 功能模块 | 监控大盘、多服务器管理、网站管理、进程与服务、文件管理、安全防护、数据库管理、软件商店 |
 | 技术栈 | Express 后端 + Vue 3 前端（Vite + TypeScript + Element Plus + Pinia），JWT 认证 |
-| 前端风格 | 参照 [youlai/vue3-element-admin](https://gitcode.com/youlai/vue3-element-admin)：经典后台布局（左侧菜单 + 顶栏 + 多标签页），不照搬宝塔原版界面 |
+| 前端风格 | 参照 [youlai/vue3-element-admin](https://gitcode.com/youlai/vue3-element-admin)：经典后台布局（左侧菜单 + 顶栏 + 多标签页） |
 | 测试环境 | 真实 Linux 服务器 `43.240.221.112`（SSH 端口 22，用户 root）；凭据存放于 `.env`，不提交 git |
 | 凭据存储 | 本地 JSON + AES-256-GCM 加密，主密钥来自环境变量 `MASTER_KEY` |
 | 架构 | 方案 B：长连接池（常驻 SSH 连接 + 自动重连） |
@@ -48,7 +48,7 @@
 6. **进程与服务**：进程列表（ps）、systemd 服务状态查看、服务启停（systemctl start/stop/restart）。
 
 ### P3（第三里程碑）
-7. **文件管理**：路径浏览、上传、下载、在线编辑、重命名、删除、chmod 权限修改。安全限制：禁止操作危险路径（`/etc/shadow`、`/etc/passwd` 等只读保护，宝塔同款防护思路）。
+7. **文件管理**：路径浏览、上传、下载、在线编辑、重命名、删除、chmod 权限修改。安全限制：禁止操作危险路径（`/etc/shadow`、`/etc/passwd` 等只读保护，主流面板同款防护思路）。
 8. **安全防护**：防火墙端口管理（自动识别 firewalld / ufw）、SSH 登录日志查看（`/var/log/auth.log` 或 `/var/log/secure`）、IP 封禁/解封（firewalld rich rule 或 iptables）。
 
 ### P1 补充（用户新增需求，随 P1 交付）
@@ -96,7 +96,7 @@ server/
 
 ## 6. 前端结构
 
-参照 [youlai/vue3-element-admin](https://gitcode.com/youlai/vue3-element-admin) 的项目结构与风格（不照搬宝塔原版界面）：
+参照 [youlai/vue3-element-admin](https://gitcode.com/youlai/vue3-element-admin) 的项目结构与风格：
 
 ```
 apps/web/

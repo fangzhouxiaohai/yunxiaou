@@ -77,7 +77,7 @@ server/data/
 `README.md`：
 
 ```markdown
-# linuxmgr — 服务器管理工具（宝塔风格）
+# linuxmgr — 服务器管理工具
 
 通过 SSH 管理远程 Linux 服务器的 Web 面板：监控大盘、多服务器管理、网站管理、进程与服务、文件管理、安全防护。
 
