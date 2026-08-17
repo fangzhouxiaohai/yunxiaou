@@ -2,6 +2,16 @@
 
 通过 SSH 管理远程 Linux 服务器的 Web 面板：监控大盘、多服务器管理、网站管理、进程与服务、文件管理、安全防护。
 
+## 加入交流群
+
+QQ 群：**812548199**（易语言 · Java · 网站技术交流）
+
+<p align="center">
+  <img src="docs/images/qq-group-qr.png" alt="QQ 群二维码" width="200" />
+</p>
+
+或点击链接直接加群：[https://qm.qq.com/q/TuZ9dWR3ys](https://qm.qq.com/q/TuZ9dWR3ys)
+
 ## 目录结构
 
 - `server/` — Express 后端（SSH 长连接池、JWT 认证、AES-256-GCM 凭据加密）
