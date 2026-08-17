@@ -21,6 +21,18 @@ const router = createRouter({
           component: () => import('@/views/servers/index.vue'),
           meta: { title: '服务器管理' },
         },
+        {
+          path: 'databases',
+          name: 'Databases',
+          component: () => import('@/views/databases/index.vue'),
+          meta: { title: '数据库管理' },
+        },
+        {
+          path: 'store',
+          name: 'Store',
+          component: () => import('@/views/store/index.vue'),
+          meta: { title: '软件商店' },
+        },
       ],
     },
   ],
