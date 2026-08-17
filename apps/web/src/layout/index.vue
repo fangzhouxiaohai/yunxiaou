@@ -33,6 +33,18 @@
         <el-menu-item index="/terminal">
           <el-icon><Monitor /></el-icon><span>终端</span>
         </el-menu-item>
+        <el-menu-item index="/logs">
+          <el-icon><Document /></el-icon><span>日志</span>
+        </el-menu-item>
+        <el-menu-item index="/crontab">
+          <el-icon><AlarmClock /></el-icon><span>计划任务</span>
+        </el-menu-item>
+        <el-menu-item index="/files">
+          <el-icon><Folder /></el-icon><span>文件管理</span>
+        </el-menu-item>
+        <el-menu-item index="/ssl">
+          <el-icon><Lock /></el-icon><span>SSL 证书</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>
@@ -72,7 +84,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Odometer, Monitor, Coin, Shop, Files, Cpu, Box, ArrowDown } from '@element-plus/icons-vue'
+import { Odometer, Monitor, Coin, Shop, Files, Cpu, Box, Document, AlarmClock, Folder, Lock, ArrowDown } from '@element-plus/icons-vue'
 import { useServerStore } from '@/stores/server'
 import { useUserStore } from '@/stores/user'
 
