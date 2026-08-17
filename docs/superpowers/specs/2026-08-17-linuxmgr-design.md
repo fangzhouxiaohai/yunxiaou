@@ -14,14 +14,15 @@
 |---|---|
 | 管理对象 | 远程 Linux 服务器（通过 SSH 连接） |
 | 功能模块 | 监控大盘、多服务器管理、网站管理、进程与服务、文件管理、安全防护 |
-| 技术栈 | Express + React + JWT + ssh2 |
-| 测试环境 | 用户有真实 Linux 服务器（后续提供凭据做冒烟验证） |
+| 技术栈 | Express 后端 + Vue 3 前端（Vite + TypeScript + Element Plus + Pinia），JWT 认证 |
+| 前端风格 | 参照 [youlai/vue3-element-admin](https://gitcode.com/youlai/vue3-element-admin)：经典后台布局（左侧菜单 + 顶栏 + 多标签页），不照搬宝塔原版界面 |
+| 测试环境 | 真实 Linux 服务器 `43.240.221.112`（SSH 端口 22，用户 root）；凭据存放于 `.env`，不提交 git |
 | 凭据存储 | 本地 JSON + AES-256-GCM 加密，主密钥来自环境变量 `MASTER_KEY` |
 | 架构 | 方案 B：长连接池（常驻 SSH 连接 + 自动重连） |
 
 ## 3. 总体架构
 
-- **单体应用**：Express 后端运行在用户本机（Windows），React SPA 前端（Vite 构建），JWT 认证。
+- **单体应用**：Express 后端运行在用户本机（Windows），Vue 3 SPA 前端（Vite + TypeScript + Element Plus 构建），JWT 认证。
 - **SSH 长连接池**：后端用 `ssh2` 为每台服务器维护常驻连接：
   - 心跳保活（每 60 秒发送 keepalive）
   - 断线自动重连（最多重试 2 次）
@@ -80,24 +81,32 @@ server/
 
 ## 6. 前端结构
 
+参照 [youlai/vue3-element-admin](https://gitcode.com/youlai/vue3-element-admin) 的项目结构与风格（不照搬宝塔原版界面）：
+
 ```
 apps/web/
   src/
-    api/                     # 请求封装（fetch + JWT header + 统一错误处理）
-    components/              # 通用组件（Toast、Modal、Table、StatCard）
-    pages/
-      Login.js
-      Dashboard.js           # 监控大盘
-      Servers.js             # 服务器列表
-      Sites.js               # 网站管理
-      Processes.js           # 进程与服务
-      Files.js               # 文件管理
-      Security.js            # 安全防护
-    App.js                   # 路由 + 布局（左侧菜单、顶部服务器切换器）
+    api/                     # 请求封装（axios + JWT 拦截器 + 统一错误处理）
+    assets/                  # 样式（Sass 变量、全局样式）
+    layout/                  # 整体布局：侧边菜单 + 顶栏（面包屑/用户区）+ 多标签页
+    router/                  # Vue Router：静态路由 + 登录守卫
+    stores/                  # Pinia：user（登录态）、app（标签页/主题）、server（当前选中服务器）
+    views/
+      login/index.vue        # 登录页
+      dashboard/index.vue    # 监控大盘（ECharts 图表）
+      servers/index.vue      # 服务器列表
+      sites/index.vue        # 网站管理
+      processes/index.vue    # 进程与服务
+      files/index.vue        # 文件管理
+      security/index.vue     # 安全防护
+    utils/                   # 工具函数
+    App.vue / main.ts
 ```
 
-- 宝塔风格深色主题；左侧菜单栏 + 顶部服务器切换器。
-- 所有 API 调用统一走 `api/request.js`：自动附加 `Authorization: Bearer <token>`，401 时跳转登录页，错误统一 Toast 提示。
+- 技术栈：Vue 3 + Vite + TypeScript + Element Plus + Pinia + Vue Router + ECharts。
+- 布局：左侧折叠菜单、顶部面包屑 + 用户下拉、多标签页缓存（经典中后台风格），支持暗色主题。
+- 所有 API 调用统一走 `api/request.ts`：自动附加 `Authorization: Bearer <token>`，401 时跳转登录页，错误统一 `ElMessage` 提示。
+- 顶部服务器切换器（全局 Pinia 状态），切换后各管理页面针对该服务器操作。
 
 ## 7. API 约定
 
@@ -117,7 +126,7 @@ apps/web/
 
 1. 单元测试（Node 内置 test runner）：JWT 签发/校验、AES 加解密、配置解析、sshParser 输出解析。
 2. 集成测试：mock SSH 客户端（`ssh2` 接口替身）跑通监控、站点、文件等模块逻辑。
-3. 冒烟验证：用户提供真实 Linux 服务器（地址、端口、用户名、密码），端到端验证登录 → 添加服务器 → 监控大盘 → 网站管理全流程。
+3. 冒烟验证：真实服务器 `43.240.221.112`（root，凭据在 `.env`），端到端验证登录 → 添加服务器 → 监控大盘 → 网站管理全流程。
 
 ## 10. 运行方式
 
@@ -128,10 +137,11 @@ MASTER_KEY=xxx JWT_SECRET=xxx ADMIN_USER=admin ADMIN_PASSWORD=xxx npm start
 
 # 前端（apps/web 目录）
 npm install
-npm run dev   # Vite dev server，代理 /api 到后端
+npm run dev   # Vite dev server（端口 5173），代理 /api 到后端（3000）
 ```
 
-生产形态：后端 `express.static` 托管前端构建产物，单端口运行。
+- `.env`（gitignore）：`MASTER_KEY`、`JWT_SECRET`、`ADMIN_USER`、`ADMIN_PASSWORD`、测试服务器凭据 `TEST_SERVER_HOST/PORT/USER/PASSWORD`。
+- 生产形态：后端 `express.static` 托管前端构建产物，单端口运行。
 
 ## 11. 范围外（第一版不做）
 
