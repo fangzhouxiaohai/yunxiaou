@@ -72,9 +72,9 @@ test('创建数据库+用户+授权', async () => {
     .send({ name: 'app_new', username: 'app_new_user', password: 'DbPass123!' });
   assert.equal(res.status, 200);
   const joined = calls.join(' ');
-  assert.ok(joined.includes('CREATE DATABASE IF NOT EXISTS `app_new`'));
+  assert.ok(joined.includes('CREATE DATABASE IF NOT EXISTS \\`app_new\\`'));
   assert.ok(joined.includes('CREATE USER'));
-  assert.ok(joined.includes('GRANT ALL PRIVILEGES ON `app_new`.*'));
+  assert.ok(joined.includes('GRANT ALL PRIVILEGES ON \\`app_new\\`.*'));
 });
 
 test('删除数据库前自动备份', async () => {
@@ -85,7 +85,7 @@ test('删除数据库前自动备份', async () => {
   const joined = calls.join(' ');
   assert.ok(joined.includes('mysqldump'), '删除前应备份');
   assert.ok(joined.includes('/tmp/linuxmgr-db-backup'));
-  assert.ok(joined.includes('DROP DATABASE `app_old`'));
+  assert.ok(joined.includes('DROP DATABASE \\`app_old\\`'));
 });
 
 test('删除数据库未确认时拒绝', async () => {
@@ -199,7 +199,7 @@ const BATCH_SELECT = 'id\tname\n1\thello\n2\tworld\n';
 
 test('表列表', async () => {
   const { app } = setup({
-    'sudo mysql -B -e "SHOW TABLES FROM `app_blog`"': () => ({ code: 0, stdout: BATCH_TABLES, stderr: '' }),
+    'sudo mysql -B -e "SHOW TABLES FROM \\`app_blog\\`"': () => ({ code: 0, stdout: BATCH_TABLES, stderr: '' }),
     default: () => ({ code: 0, stdout: '', stderr: '' }),
   });
   const res = await request(app).get('/api/servers/srv1/databases/app_blog/tables').set(await auth(app));
@@ -210,7 +210,7 @@ test('表列表', async () => {
 
 test('表结构', async () => {
   const { app } = setup({
-    'sudo mysql -B -e "DESCRIBE `app_blog`.`posts`"': () => ({ code: 0, stdout: BATCH_DESCRIBE, stderr: '' }),
+    'sudo mysql -B -e "DESCRIBE \\`app_blog\\`.\\`posts\\`"': () => ({ code: 0, stdout: BATCH_DESCRIBE, stderr: '' }),
     default: () => ({ code: 0, stdout: '', stderr: '' }),
   });
   const res = await request(app).get('/api/servers/srv1/databases/app_blog/tables/posts/structure').set(await auth(app));
@@ -221,8 +221,8 @@ test('表结构', async () => {
 
 test('数据浏览分页', async () => {
   const { app, calls } = setup({
-    'sudo mysql -B -e "SELECT * FROM `app_blog`.`posts` LIMIT 10 OFFSET 10"': () => ({ code: 0, stdout: BATCH_SELECT, stderr: '' }),
-    'sudo mysql -N -e "SELECT COUNT(*) FROM `app_blog`.`posts`"': () => ({ code: 0, stdout: '42\n', stderr: '' }),
+    'sudo mysql -B -e "SELECT * FROM \\`app_blog\\`.\\`posts\\` LIMIT 10 OFFSET 10"': () => ({ code: 0, stdout: BATCH_SELECT, stderr: '' }),
+    'sudo mysql -N -e "SELECT COUNT(*) FROM \\`app_blog\\`.\\`posts\\`"': () => ({ code: 0, stdout: '42\n', stderr: '' }),
     default: () => ({ code: 0, stdout: '', stderr: '' }),
   });
   const res = await request(app).get('/api/servers/srv1/databases/app_blog/tables/posts/rows?page=2&limit=10').set(await auth(app));
@@ -259,7 +259,7 @@ test('危险 SQL 无 WHERE 的 DELETE 即使确认也拒绝', async () => {
 
 test('危险 SQL DROP TABLE 需确认', async () => {
   const { app, calls } = setup({
-    'sudo mysql -B -e "DROP TABLE `app_blog`.`old_posts`"': () => ({ code: 0, stdout: '', stderr: '' }),
+    'sudo mysql -B -e "DROP TABLE \\`app_blog\\`.\\`old_posts\\`"': () => ({ code: 0, stdout: '', stderr: '' }),
     default: () => ({ code: 0, stdout: '', stderr: '' }),
   });
   const res = await request(app).post('/api/servers/srv1/sql').set(await auth(app))

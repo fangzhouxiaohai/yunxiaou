@@ -36,11 +36,20 @@ function createDatabaseRouter({ config, pool, store }) {
     return ''; // sudo 模式
   }
 
+  // bash 转义：双引号内的 ` " $ \ 需转义，防止命令注入/命令替换（真实 bash 执行）
+  function bashEscape(sql) {
+    return sql
+      .replace(/\\/g, '\\\\')
+      .replace(/`/g, '\\`')
+      .replace(/"/g, '\\"')
+      .replace(/\$/g, '\\$');
+  }
+
   function mysqlCmd(server, sql, res) {
     const auth = mysqlAuth(server, res);
     if (auth === null) return null;
-    if (auth) return `mysql ${auth} -N -e "${sql}"`;
-    return `sudo mysql -N -e "${sql}"`;
+    if (auth) return `mysql ${auth} -N -e "${bashEscape(sql)}"`;
+    return `sudo mysql -N -e "${bashEscape(sql)}"`;
   }
 
   function mysqldumpCmd(server, db, res) {
@@ -54,8 +63,8 @@ function createDatabaseRouter({ config, pool, store }) {
   function mysqlBatchCmd(server, sql, res) {
     const auth = mysqlAuth(server, res);
     if (auth === null) return null;
-    if (auth) return `mysql ${auth} -B -e "${sql}"`;
-    return `sudo mysql -B -e "${sql}"`;
+    if (auth) return `mysql ${auth} -B -e "${bashEscape(sql)}"`;
+    return `sudo mysql -B -e "${bashEscape(sql)}"`;
   }
 
   // SQL 安全检查：只读放行；写操作需 confirm；无 WHERE 的全表 DELETE/UPDATE 直接拒绝
