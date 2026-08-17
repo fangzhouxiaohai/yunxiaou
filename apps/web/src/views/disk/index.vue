@@ -3,6 +3,10 @@
     <el-empty description="请先在「服务器管理」中添加并选择服务器" />
   </div>
   <div v-else>
+    <div class="page-header">
+      <span class="page-title">磁盘管理</span>
+      <div class="page-actions"></div>
+    </div>
     <el-tabs v-model="activeTab">
       <el-tab-pane label="磁盘与分区" name="disks">
         <el-card>
@@ -49,7 +53,7 @@
       </el-tab-pane>
     </el-tabs>
 
-    <el-dialog v-model="mountDialogVisible" title="挂载分区" width="440px">
+    <el-dialog v-model="mountDialogVisible" title="挂载分区" width="min(440px, 92vw)">
       <el-form label-width="90px">
         <el-form-item label="设备">
           <el-input :model-value="`/dev/${mountForm.device}`" disabled />

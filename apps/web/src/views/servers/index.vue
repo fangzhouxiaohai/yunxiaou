@@ -1,7 +1,10 @@
 <template>
   <el-card>
-    <div class="toolbar">
-      <el-button type="primary" @click="openDialog()">新增服务器</el-button>
+    <div class="page-header">
+      <span class="page-title">服务器管理</span>
+      <div class="page-actions">
+        <el-button type="primary" @click="openDialog()">新增服务器</el-button>
+      </div>
     </div>
     <el-table :data="serverStore.servers" v-loading="loading">
       <el-table-column prop="name" label="名称" min-width="120" />
@@ -27,7 +30,7 @@
     </el-table>
   </el-card>
 
-  <el-dialog v-model="dialogVisible" :title="form.id ? '编辑服务器' : '新增服务器'" width="480px">
+  <el-dialog v-model="dialogVisible" :title="form.id ? '编辑服务器' : '新增服务器'" width="min(480px, 92vw)">
     <el-form :model="form" label-width="90px">
       <el-form-item label="名称" required>
         <el-input v-model="form.name" placeholder="如：生产环境-Web" />
@@ -145,7 +148,6 @@ async function onDelete(row: { id: string; name: string }) {
 </script>
 
 <style scoped lang="scss">
-.toolbar { margin-bottom: 16px; }
 .ok { color: #67c23a; font-size: 12px; }
 .fail { color: #f56c6c; font-size: 12px; }
 </style>

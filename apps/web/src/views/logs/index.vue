@@ -4,20 +4,23 @@
   </div>
   <div v-else>
     <el-card>
-      <div class="toolbar">
-        <el-select v-model="logPath" placeholder="选择日志文件" style="width: 320px" @change="load">
-          <el-option v-for="f in files" :key="f.path" :label="`${f.path}${f.exists ? ` (${(f.size / 1024).toFixed(0)}KB)` : ' (不存在)'}`" :value="f.path" />
-        </el-select>
-        <el-input v-model="customPath" placeholder="自定义路径（/var/log 下）" style="width: 280px" @keyup.enter="useCustom" />
-        <el-button @click="useCustom">读取</el-button>
-        <el-select v-model="lines" style="width: 110px">
-          <el-option :value="100" label="100 行" />
-          <el-option :value="200" label="200 行" />
-          <el-option :value="500" label="500 行" />
-        </el-select>
-        <el-switch v-model="autoRefresh" active-text="自动刷新" />
+      <div class="page-header">
+        <span class="page-title">日志</span>
+        <div class="page-actions">
+          <el-select v-model="logPath" placeholder="选择日志文件" style="width: 320px" @change="load">
+            <el-option v-for="f in files" :key="f.path" :label="`${f.path}${f.exists ? ` (${(f.size / 1024).toFixed(0)}KB)` : ' (不存在)'}`" :value="f.path" />
+          </el-select>
+          <el-input v-model="customPath" placeholder="自定义路径（/var/log 下）" style="width: 280px" @keyup.enter="useCustom" />
+          <el-button @click="useCustom">读取</el-button>
+          <el-select v-model="lines" style="width: 110px">
+            <el-option :value="100" label="100 行" />
+            <el-option :value="200" label="200 行" />
+            <el-option :value="500" label="500 行" />
+          </el-select>
+          <el-switch v-model="autoRefresh" active-text="自动刷新" />
+        </div>
       </div>
-      <pre class="log-box">{{ content || '（选择日志文件查看内容）' }}</pre>
+      <pre class="code-box">{{ content || '（选择日志文件查看内容）' }}</pre>
     </el-card>
   </div>
 </template>
@@ -68,10 +71,5 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped lang="scss">
-.toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
-.log-box {
-  background: #0d1117; color: #c9d1d9; padding: 16px; border-radius: 6px;
-  font-size: 12px; line-height: 1.6; max-height: 65vh; overflow: auto;
-  white-space: pre-wrap; word-break: break-all;
-}
+.code-box { max-height: 65vh; }
 </style>

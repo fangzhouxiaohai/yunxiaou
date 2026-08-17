@@ -4,9 +4,12 @@
   </div>
   <div v-else>
     <el-card>
-      <div class="toolbar">
-        <el-button type="primary" @click="openDialog">新增计划任务</el-button>
-        <el-button @click="load">刷新</el-button>
+      <div class="page-header">
+        <span class="page-title">计划任务</span>
+        <div class="page-actions">
+          <el-button type="primary" @click="openDialog">新增计划任务</el-button>
+          <el-button @click="load">刷新</el-button>
+        </div>
       </div>
       <el-table :data="entries" v-loading="loading">
         <el-table-column prop="line" label="任务" min-width="360" show-overflow-tooltip />
@@ -24,7 +27,7 @@
       </el-table>
     </el-card>
 
-    <el-dialog v-model="dialogVisible" title="新增计划任务" width="520px">
+    <el-dialog v-model="dialogVisible" title="新增计划任务" width="min(520px, 92vw)">
       <el-form label-width="100px">
         <el-form-item label="任务类型" required>
           <el-radio-group v-model="taskType">
@@ -236,7 +239,6 @@ async function onDelete(row: CrontabEntry) {
 </script>
 
 <style scoped lang="scss">
-.toolbar { margin-bottom: 16px; }
 .time-gap { margin-left: 12px; }
 .preview-tag { max-width: 100%; white-space: normal; height: auto; line-height: 1.5; word-break: break-all; }
 </style>

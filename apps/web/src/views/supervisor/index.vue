@@ -14,9 +14,12 @@
   </div>
   <div v-else>
     <el-card>
-      <div class="toolbar">
-        <el-button type="primary" @click="dialogVisible = true">新建进程</el-button>
-        <el-button @click="load">刷新</el-button>
+      <div class="page-header">
+        <span class="page-title">进程守护</span>
+        <div class="page-actions">
+          <el-button type="primary" @click="dialogVisible = true">新建进程</el-button>
+          <el-button @click="load">刷新</el-button>
+        </div>
       </div>
       <el-table :data="programs" v-loading="loading">
         <el-table-column prop="name" label="进程名" min-width="180" />
@@ -58,7 +61,7 @@
       </el-table>
     </el-card>
 
-    <el-dialog v-model="dialogVisible" title="新建守护进程" width="520px">
+    <el-dialog v-model="dialogVisible" title="新建守护进程" width="min(520px, 92vw)">
       <el-form :model="form" label-width="90px">
         <el-form-item label="进程名" required>
           <el-input v-model="form.name" placeholder="字母/数字/_-（将加 linuxmgr- 前缀）" />
@@ -160,6 +163,5 @@ async function onDelete(row: Program) {
 </script>
 
 <style scoped lang="scss">
-.toolbar { margin-bottom: 16px; }
 .alert-gap { margin-bottom: 16px; }
 </style>

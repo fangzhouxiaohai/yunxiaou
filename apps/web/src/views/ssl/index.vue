@@ -4,10 +4,13 @@
   </div>
   <div v-else>
     <el-card>
-      <div class="toolbar">
-        <el-button type="primary" @click="openUpload">上传证书</el-button>
-        <el-button type="warning" @click="openSelf">生成自签证书</el-button>
-        <el-button @click="load">刷新</el-button>
+      <div class="page-header">
+        <span class="page-title">SSL 证书</span>
+        <div class="page-actions">
+          <el-button type="primary" @click="openUpload">上传证书</el-button>
+          <el-button type="warning" @click="openSelf">生成自签证书</el-button>
+          <el-button @click="load">刷新</el-button>
+        </div>
       </div>
       <el-table :data="certs" v-loading="loading">
         <el-table-column prop="domain" label="域名" min-width="160" />
@@ -19,7 +22,7 @@
       <el-empty v-if="!loading && certs.length === 0" description="暂无证书" />
     </el-card>
 
-    <el-dialog v-model="uploadDialog" title="上传证书" width="640px">
+    <el-dialog v-model="uploadDialog" title="上传证书" width="min(640px, 92vw)">
       <el-alert
         type="info"
         show-icon
@@ -46,7 +49,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="selfDialog" title="生成自签证书" width="480px">
+    <el-dialog v-model="selfDialog" title="生成自签证书" width="min(480px, 92vw)">
       <el-alert
         type="success"
         show-icon
@@ -67,7 +70,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="noDomainDialog" title="提示" width="420px">
+    <el-dialog v-model="noDomainDialog" title="提示" width="min(420px, 92vw)">
       <el-empty description="暂无可用的项目域名" />
       <p class="no-domain-hint">请先在「项目」中创建项目并配置域名，然后在 SSL 页面选择该域名生成证书。</p>
       <template #footer>
@@ -180,7 +183,6 @@ async function onSelfSigned() {
 </script>
 
 <style scoped lang="scss">
-.toolbar { margin-bottom: 16px; }
 .alert-gap { margin-bottom: 12px; }
 .no-domain-hint { color: #909399; font-size: 13px; text-align: center; }
 </style>
