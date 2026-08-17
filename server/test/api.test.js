@@ -22,7 +22,7 @@ function setup() {
   });
   const stores = { servers: new JsonStore(dataDir, 'servers.json', []) };
   const app = createApp({ config, pool: fakePool(), stores });
-  return { app, stores };
+  return { app, stores, dataDir };
 }
 
 async function login(app) {
@@ -136,4 +136,11 @@ test('修改密码：新密码少于 6 位返回 400，未登录返回 401', asy
   const noAuth = await request(app).put('/api/auth/password')
     .send({ oldPassword: 'pw', newPassword: 'newpass1' });
   assert.equal(noAuth.status, 401);
+});
+
+test('auth.json 损坏时拒绝登录（fail-closed）', async () => {
+  const { app, dataDir } = setup();
+  fs.writeFileSync(path.join(dataDir, 'auth.json'), '{bad json', 'utf8');
+  const res = await request(app).post('/api/auth/login').send({ username: 'admin', password: 'pw' });
+  assert.equal(res.status, 401);
 });

@@ -50,7 +50,7 @@
 - 🏷️ 所有新增配置统一 `linuxmgr-` 前缀，**不修改服务器任何已有配置**；Nginx 只用 reload 不重启
 - 📋 全部写操作二次确认 + 审计日志（`data/audit.log`）
 - ⚠️ 无 WHERE 的 DELETE/UPDATE、`curl | bash` 等危险操作被拦截
-- 🔐 支持在线修改管理员密码（scrypt 加盐哈希存储于 data/auth.json；已签发的 JWT 在 24h 有效期内仍然可用）
+- 🔐 支持在线修改管理员密码（scrypt 加盐哈希存储于 `data/auth.json`；已签发的 JWT 在 24h 有效期内仍然可用）
 
 ## 技术架构
 

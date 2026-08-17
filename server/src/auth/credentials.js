@@ -26,23 +26,31 @@ function safeEqualHex(a, b) {
 function createCredentials({ dataDir, envUser, envPassword }) {
   const file = path.join(dataDir, 'auth.json');
 
+  // 文件不存在 → 正常回退；存在但损坏/字段不完整 → 拒绝登录（fail-closed）
   function readStored() {
-    if (!fs.existsSync(file)) return null;
+    if (!fs.existsSync(file)) return { state: 'missing' };
     try {
-      return JSON.parse(fs.readFileSync(file, 'utf8'));
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (parsed && parsed.username && parsed.passwordHash && parsed.salt) {
+        return { state: 'ok', data: parsed };
+      }
     } catch {
-      return null;
+      // 解析失败按损坏处理
     }
+    console.error(`[auth] 警告：${file} 已损坏或字段不完整，已拒绝所有登录；请修复文件，或由管理员在线修改密码覆盖损坏文件`);
+    return { state: 'corrupt' };
   }
 
   function current() {
     const stored = readStored();
-    if (stored && stored.username && stored.passwordHash && stored.salt) return stored;
+    if (stored.state === 'ok') return stored.data;
+    if (stored.state === 'corrupt') return { corrupt: true, username: envUser || 'admin' };
     return { username: envUser || 'admin', password: envPassword || '123456' };
   }
 
   function verify(username, password) {
     const c = current();
+    if (c.corrupt) return false;
     if (username !== c.username) return false;
     if (c.password !== undefined) {
       return safeEqualStr(password || '', c.password);
