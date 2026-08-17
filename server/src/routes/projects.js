@@ -5,6 +5,7 @@ const { assertCommandSafe } = require('../ssh/exec');
 
 const NAME_RE = /^[a-zA-Z0-9_-]{1,32}$/;
 const DIR_RE = /^\/[a-zA-Z0-9_/.-]{1,200}$/;
+const DOMAIN_RE = /^[a-zA-Z0-9.-]{1,100}$/;
 const TYPES = ['php', 'node', 'python', 'java'];
 const ACTIONS = ['start', 'stop', 'restart'];
 const PROTECTED_DIRS = ['/', '/etc', '/var', '/usr', '/boot', '/home', '/root', '/tmp', '/dev', '/proc', '/sys', '/run', '/opt', '/srv'];
@@ -50,11 +51,12 @@ User=root
 WantedBy=multi-user.target`;
   }
 
-  function nginxVhost(name, dir, port, sock) {
+  function nginxVhost(name, dir, port, sock, domain) {
     // 单引号 heredoc 保证 $uri 等不被 bash 展开
+    const serverName = domain || `linuxmgr-${name}.local`;
     return `server {
     listen ${port};
-    server_name linuxmgr-${name}.local;
+    server_name ${serverName};
     root ${dir};
     index index.php index.html;
     location / { try_files $uri $uri/ =404; }
@@ -87,9 +89,10 @@ WantedBy=multi-user.target`;
   router.post('/servers/:id/projects', async (req, res) => {
     const server = findServer(req.params.id);
     if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
-    const { name, type, directory, port, entry, phpVersion } = req.body || {};
+    const { name, type, directory, port, entry, phpVersion, domain } = req.body || {};
     if (!name || !NAME_RE.test(name)) return res.status(400).json({ code: 400, message: '项目名不合法（字母/数字/_-，1-32 位）' });
     if (!TYPES.includes(type)) return res.status(400).json({ code: 400, message: `项目类型必须为 ${TYPES.join('/')}` });
+    if (domain && !DOMAIN_RE.test(domain)) return res.status(400).json({ code: 400, message: '域名不合法' });
     if (!directory || !DIR_RE.test(directory)) return res.status(400).json({ code: 400, message: '目录路径不合法' });
     if (PROTECTED_DIRS.some((p) => directory === p || directory.startsWith(`${p}/`))) {
       return res.status(400).json({ code: 400, message: '禁止使用系统关键目录' });
@@ -113,7 +116,7 @@ WantedBy=multi-user.target`;
       if (mkdir.code !== 0) throw new Error(mkdir.stderr.slice(0, 200));
 
       if (type === 'php') {
-        const vhost = nginxVhost(name, directory, portNum, PHP_SOCK[phpVersion]);
+        const vhost = nginxVhost(name, directory, portNum, PHP_SOCK[phpVersion], domain);
         const writeCmd = `cat > /etc/nginx/conf.d/linuxmgr-${name}.conf <<'LINUXMGR_EOF'\n${vhost}\nLINUXMGR_EOF`;
         const w = await pool.run(cfg, writeCmd);
         if (w.code !== 0) throw new Error(`写入 vhost 失败: ${w.stderr.slice(0, 200)}`);
@@ -140,6 +143,7 @@ WantedBy=multi-user.target`;
         port: portNum,
         entry: type === 'php' ? '' : entry.trim(),
         phpVersion: type === 'php' ? phpVersion : undefined,
+        domain: domain || undefined,
         createdAt: new Date().toISOString(),
       };
       const list = projectStore.read();

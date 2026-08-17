@@ -5,7 +5,26 @@ const { audit } = require('../utils/audit');
 const DOMAIN_RE = /^[a-zA-Z0-9.-]{1,100}$/;
 const SSL_DIR = '/etc/nginx/ssl';
 
-function createSslRouter({ config, pool, store }) {
+// 自签证书自动续期脚本模板（单引号 heredoc 写入，$ 保持字面量）
+function renewScript(domain) {
+  return `#!/bin/bash
+# linuxmgr renew ${domain}
+CRT=${SSL_DIR}/linuxmgr-${domain}.crt
+KEY=${SSL_DIR}/linuxmgr-${domain}.key
+[ -f "$CRT" ] || exit 0
+END=$(openssl x509 -in "$CRT" -noout -enddate 2>/dev/null | cut -d= -f2)
+[ -n "$END" ] || exit 0
+EXP=$(date -d "$END" +%s 2>/dev/null)
+[ -n "$EXP" ] || exit 0
+DAYS=$(( (EXP - $(date +%s)) / 86400 ))
+if [ "$DAYS" -lt 30 ]; then
+  openssl req -x509 -newkey rsa:2048 -nodes -days 365 -keyout "$KEY" -out "$CRT" -subj "/CN=${domain}" 2>/dev/null
+  nginx -t >/dev/null 2>&1 && nginx -s reload
+fi
+`;
+}
+
+function createSslRouter({ config, pool, store, projectStore }) {
   const router = express.Router();
 
   const findServer = (id) => store.read().find((s) => s.id === id);
@@ -29,6 +48,49 @@ function createSslRouter({ config, pool, store }) {
     }
     return info;
   }
+
+  // 将证书配置追加到项目 vhost（幂等：已有关联标记则跳过）
+  async function linkVhost(cfg, server, domain) {
+    if (!projectStore) return { linked: false, reason: '项目存储不可用' };
+    const project = projectStore.read().find((p) => p.domain === domain);
+    if (!project) return { linked: false, reason: '未找到该域名的项目' };
+    const vhost = `/etc/nginx/conf.d/${project.name}.conf`;
+    const cat = await pool.run(cfg, `cat ${vhost}`);
+    if (cat.code !== 0) return { linked: false, reason: '项目 vhost 不存在（项目可能已删除）' };
+    const marker = `linuxmgr-ssl-${domain}`;
+    if (cat.stdout.includes(marker)) return { linked: true, reason: '已关联' };
+    const base = cat.stdout.replace(/\}\s*$/, '').trimEnd();
+    const block = `${base}\n\n    # ${marker}\n    listen 443 ssl;\n    ssl_certificate ${SSL_DIR}/linuxmgr-${domain}.crt;\n    ssl_certificate_key ${SSL_DIR}/linuxmgr-${domain}.key;\n}`;
+    const writeCmd = `cat > ${vhost} <<'LINUXMGR_EOF'\n${block}\nLINUXMGR_EOF`;
+    const w = await pool.run(cfg, writeCmd);
+    if (w.code !== 0) return { linked: false, reason: w.stderr.slice(0, 200) };
+    const t = await pool.run(cfg, 'nginx -t && nginx -s reload');
+    if (t.code !== 0) return { linked: false, reason: `nginx 校验失败: ${t.stderr.slice(0, 200)}` };
+    return { linked: true, reason: '已关联并 reload' };
+  }
+
+  // 设置自动续期：写入续期脚本 + crontab（linuxmgr- 标记，每天 3 点检查）
+  async function setupAutoRenew(cfg, server, domain) {
+    const scriptPath = `/usr/local/bin/linuxmgr-renew-${domain}.sh`;
+    const scriptCmd = `cat > ${scriptPath} <<'LINUXMGR_EOF'\n${renewScript(domain)}\nLINUXMGR_EOF\nchmod +x ${scriptPath}`;
+    const s = await pool.run(cfg, scriptCmd);
+    if (s.code !== 0) return { ok: false, reason: s.stderr.slice(0, 200) };
+    const cronCmd = `( crontab -l 2>/dev/null; echo "# linuxmgr-renew-${domain}"; echo "0 3 * * * ${scriptPath}" ) | crontab -`;
+    const c = await pool.run(cfg, cronCmd);
+    if (c.code !== 0) return { ok: false, reason: c.stderr.slice(0, 200) };
+    return { ok: true };
+  }
+
+  // 项目域名列表（仅已创建项目配置的域名）
+  router.get('/servers/:id/ssl/domains', (req, res) => {
+    const server = findServer(req.params.id);
+    if (!server) return res.status(404).json({ code: 404, message: '服务器不存在' });
+    if (!projectStore) return res.json({ code: 0, data: [] });
+    const domains = projectStore.read()
+      .filter((p) => p.domain)
+      .map((p) => ({ domain: p.domain, project: p.name, type: p.type }));
+    res.json({ code: 0, data: domains });
+  });
 
   router.get('/servers/:id/ssl', async (req, res) => {
     const server = findServer(req.params.id);
@@ -72,8 +134,9 @@ function createSslRouter({ config, pool, store }) {
         const r = await pool.run(cfg, cmd);
         if (r.code !== 0) throw new Error(r.stderr.slice(0, 200) || `退出码 ${r.code}`);
       }
-      audit(config.dataDir, { action: 'ssl.upload', target: server.host, detail: domain, result: 'success' });
-      res.json({ code: 0, data: { domain } });
+      const linked = await linkVhost(cfg, server, domain);
+      audit(config.dataDir, { action: 'ssl.upload', target: server.host, detail: domain, result: 'success', detail2: linked.reason });
+      res.json({ code: 0, data: { domain, vhost: linked } });
     } catch (err) {
       res.status(502).json({ code: 502, message: `上传证书失败: ${err.message}` });
     }
@@ -90,8 +153,13 @@ function createSslRouter({ config, pool, store }) {
       const cmd = `mkdir -p ${SSL_DIR} && openssl req -x509 -newkey rsa:2048 -nodes -days 365 -keyout ${SSL_DIR}/linuxmgr-${domain}.key -out ${SSL_DIR}/linuxmgr-${domain}.crt -subj "/CN=${domain}"`;
       const r = await pool.run(cfg, cmd, { timeoutMs: 60000 });
       if (r.code !== 0) throw new Error(r.stderr.slice(0, 200) || `退出码 ${r.code}`);
-      audit(config.dataDir, { action: 'ssl.selfsigned', target: server.host, detail: domain, result: 'success' });
-      res.json({ code: 0, data: { domain } });
+      // 自动续期（每天 3 点检查，剩余 <30 天自动重新生成）
+      const renew = await setupAutoRenew(cfg, server, domain);
+      if (!renew.ok) throw new Error(`自动续期设置失败: ${renew.reason}`);
+      // 关联项目 vhost（自动加 443 ssl 段）
+      const linked = await linkVhost(cfg, server, domain);
+      audit(config.dataDir, { action: 'ssl.selfsigned', target: server.host, detail: domain, result: 'success', detail2: `renew=${renew.ok} vhost=${linked.reason}` });
+      res.json({ code: 0, data: { domain, autoRenew: true, vhost: linked } });
     } catch (err) {
       res.status(502).json({ code: 502, message: `生成自签证书失败: ${err.message}` });
     }

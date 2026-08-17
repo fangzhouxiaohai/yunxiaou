@@ -34,7 +34,7 @@ function createApp({ config, pool, stores }) {
   app.use('/api', requireAuth(config), createLogsRouter({ config, pool, store: stores.servers }));
   app.use('/api', requireAuth(config), createCrontabRouter({ config, pool, store: stores.servers }));
   app.use('/api', requireAuth(config), createFilesRouter({ config, pool, store: stores.servers }));
-  app.use('/api', requireAuth(config), createSslRouter({ config, pool, store: stores.servers }));
+  app.use('/api', requireAuth(config), createSslRouter({ config, pool, store: stores.servers, projectStore: stores.projects }));
   app.use('/api/servers', requireAuth(config), createServersRouter({ config, pool, store: stores.servers }));
 
   const webDist = path.join(__dirname, '..', '..', 'apps', 'web', 'dist');

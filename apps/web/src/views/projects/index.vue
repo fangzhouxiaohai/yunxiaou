@@ -74,6 +74,9 @@
         <el-form-item label="运行端口" required>
           <el-input-number v-model="form.port" :min="1" :max="65535" />
         </el-form-item>
+        <el-form-item label="域名">
+          <el-input v-model="form.domain" placeholder="可选，如 blog.example.com（SSL 证书将按此域名生成）" />
+        </el-form-item>
         <el-form-item v-if="form.type === 'php'" label="PHP 版本" required>
           <el-select v-model="form.phpVersion" placeholder="选择 PHP 版本">
             <el-option v-for="v in ['php74', 'php80', 'php81', 'php82', 'php83']" :key="v" :label="v" :value="v" />
@@ -113,7 +116,7 @@ const acting = ref('')
 const saving = ref(false)
 const dialogVisible = ref(false)
 const form = reactive({
-  name: '', type: 'node', directory: '', port: 3000, entry: '', phpVersion: 'php82',
+  name: '', type: 'node', directory: '', port: 3000, entry: '', phpVersion: 'php82', domain: '',
 })
 const logDrawer = ref(false)
 const logs = ref('')
@@ -147,11 +150,13 @@ async function onCreate() {
     }
     if (form.type === 'php') payload.phpVersion = form.phpVersion
     else payload.entry = form.entry
+    if (form.domain.trim()) payload.domain = form.domain.trim()
     await createProject(serverStore.currentId!, payload as never)
     ElMessage.success('项目创建成功')
     dialogVisible.value = false
     form.name = ''
     form.entry = ''
+    form.domain = ''
     await load()
   } finally {
     saving.value = false

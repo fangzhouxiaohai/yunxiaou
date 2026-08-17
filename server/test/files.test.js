@@ -9,11 +9,15 @@ const { loadConfig } = require('../src/config');
 const { JsonStore } = require('../src/store/jsonStore');
 const { encrypt } = require('../src/crypto/cipher');
 
-function setup(scripted) {
+function setup(scripted, projectSeed = []) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'linuxmgr-files-'));
   const { config } = loadConfig({ JWT_SECRET: 's', MASTER_KEY: 'k', ADMIN_USER: 'admin', ADMIN_PASSWORD: 'pw', DATA_DIR: dataDir });
-  const stores = { servers: new JsonStore(dataDir, 'servers.json', []) };
+  const stores = {
+    servers: new JsonStore(dataDir, 'servers.json', []),
+    projects: new JsonStore(dataDir, 'projects.json', []),
+  };
   stores.servers.write([{ id: 'srv1', name: 't', host: '10.0.0.1', port: 22, username: 'root', passwordEnc: encrypt('p', 'k'), createdAt: new Date().toISOString() }]);
+  if (projectSeed.length > 0) stores.projects.write(projectSeed);
   const calls = [];
   const pool = {
     async run(cfg, command, opts) {
@@ -141,4 +145,54 @@ test('SSL 自签证书', async () => {
     .send({ domain: 'test.local' });
   assert.equal(res.status, 200);
   assert.ok(calls.some((c) => c.includes('openssl req')), '应执行 openssl 自签');
+});
+
+test('项目域名列表（仅已配置域名的项目）', async () => {
+  const seed = [
+    { name: 'linuxmgr-blog', type: 'php', directory: '/www/blog', port: 8080, domain: 'blog.example.com', createdAt: '2026-01-01' },
+    { name: 'linuxmgr-api', type: 'node', directory: '/www/api', port: 3001, createdAt: '2026-01-01' },
+  ];
+  const { app } = setup({ default: () => ({ code: 0, stdout: '', stderr: '' }) }, seed);
+  const res = await request(app).get('/api/servers/srv1/ssl/domains').set(await auth(app));
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.length, 1, '只有配置了域名的项目出现');
+  assert.equal(res.body.data[0].domain, 'blog.example.com');
+  assert.equal(res.body.data[0].project, 'linuxmgr-blog');
+});
+
+test('自签证书自动设置续期（脚本 + crontab）并关联项目 vhost', async () => {
+  const seed = [
+    { name: 'linuxmgr-blog', type: 'php', directory: '/www/blog', port: 8080, domain: 'blog.example.com', createdAt: '2026-01-01' },
+  ];
+  const { app, calls } = setup({
+    'cat /etc/nginx/conf.d/linuxmgr-blog.conf': () => ({ code: 0, stdout: 'server {\n    listen 8080;\n    server_name blog.example.com;\n}\n', stderr: '' }),
+    default: () => ({ code: 0, stdout: '', stderr: '' }),
+  }, seed);
+  const res = await request(app).post('/api/servers/srv1/ssl/selfsigned').set(await auth(app))
+    .send({ domain: 'blog.example.com' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.data.autoRenew, true);
+  assert.equal(res.body.data.vhost.linked, true);
+  const joined = calls.join(' ');
+  assert.ok(joined.includes('linuxmgr-renew-blog.example.com.sh'), '应写续期脚本');
+  assert.ok(joined.includes('# linuxmgr-renew-blog.example.com'), 'crontab 应带标记');
+  assert.ok(joined.includes('0 3 * * * /usr/local/bin/linuxmgr-renew-blog.example.com.sh'), '应每天 3 点检查');
+  assert.ok(joined.includes('listen 443 ssl'), 'vhost 应追加 443 ssl 段');
+  assert.ok(joined.includes('nginx -t && nginx -s reload'), '应 reload nginx');
+});
+
+test('自签证书重复生成时 vhost 不重复追加（幂等）', async () => {
+  const seed = [
+    { name: 'linuxmgr-blog', type: 'php', directory: '/www/blog', port: 8080, domain: 'blog.example.com', createdAt: '2026-01-01' },
+  ];
+  const { app, calls } = setup({
+    'cat /etc/nginx/conf.d/linuxmgr-blog.conf': () => ({ code: 0, stdout: 'server {\n    listen 8080;\n    # linuxmgr-ssl-blog.example.com\n    listen 443 ssl;\n}\n', stderr: '' }),
+    default: () => ({ code: 0, stdout: '', stderr: '' }),
+  }, seed);
+  const res = await request(app).post('/api/servers/srv1/ssl/selfsigned').set(await auth(app))
+    .send({ domain: 'blog.example.com' });
+  assert.equal(res.status, 200);
+  const joined = calls.join(' ');
+  const writeCount = joined.split('cat > /etc/nginx/conf.d/linuxmgr-blog.conf').length - 1;
+  assert.equal(writeCount, 0, '已有关联标记时不应重写 vhost');
 });
